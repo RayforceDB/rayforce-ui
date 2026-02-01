@@ -138,6 +138,9 @@ int rfui_tokenize(const char* text, rfui_token_t* tokens, int max_tokens) {
     return count;
 }
 
+const char** rfui_get_keywords(void) { return (const char**)keywords; }
+const char** rfui_get_builtins(void) { return (const char**)builtins; }
+
 ImVec4 rfui_token_color(rfui_tok_type_t type) {
     switch (type) {
         case TOK_COMMENT: return ImVec4(0.545f, 0.580f, 0.620f, 1.0f); // #8B949E

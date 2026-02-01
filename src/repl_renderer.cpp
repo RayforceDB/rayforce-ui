@@ -5,6 +5,7 @@
 #include <string.h>
 #include <vector>
 #include <string>
+#include <algorithm>
 
 #include "imgui.h"
 #include "ImGuiFileDialog.h"
@@ -14,6 +15,7 @@
 // Scrollback limits
 static const int MAX_HISTORY_SIZE = 1000;
 static const int MAX_OUTPUT_LINES = 10000;
+static const int MAX_CONSOLE_LINES = 10000;
 
 #define _Static_assert static_assert
 
@@ -34,6 +36,19 @@ struct terminal_line_t {
     LineType type;
 };
 
+// Console log levels
+enum LogLevel {
+    LOG_DEBUG = 0,
+    LOG_INFO  = 1,
+    LOG_WARN  = 2,
+    LOG_ERROR = 3
+};
+
+struct console_line_t {
+    std::string text;
+    LogLevel level;
+};
+
 // REPL state
 struct repl_state_t {
     char input_buf[4096];
@@ -42,6 +57,20 @@ struct repl_state_t {
     int history_pos;
     bool scroll_to_bottom;
     std::string saved_input;
+
+    // Console tab
+    std::vector<console_line_t> console_lines;
+    bool console_scroll_to_bottom;
+
+    // Click-to-focus (deferred one frame)
+    bool focus_next_frame;
+
+    // Autocomplete
+    bool show_autocomplete;
+    std::vector<std::string> completions;
+    int autocomplete_idx;
+    std::string completion_prefix;
+    int completion_prefix_start;  // byte offset of prefix in input_buf
 };
 
 // Module-level REPL state (singleton — one REPL per application)
@@ -193,12 +222,99 @@ static void render_ansi_text(const char* text, ImVec4 default_color) {
     }
 }
 
-// History navigation callback
+static bool is_word_char_ac(char c) {
+    return isalnum((unsigned char)c) || c == '_' || c == '-' || c == '?' || c == '!';
+}
+
+// Extract the word before cursor position
+static void extract_prefix(const char* buf, int cursor_pos, std::string& prefix, int& prefix_start) {
+    int start = cursor_pos;
+    while (start > 0 && is_word_char_ac(buf[start - 1])) {
+        start--;
+    }
+    prefix.assign(buf + start, cursor_pos - start);
+    prefix_start = start;
+}
+
+// Build filtered completion list from prefix
+static void update_completions(repl_state_t* state, const char* buf, int cursor_pos) {
+    std::string prefix;
+    int prefix_start;
+    extract_prefix(buf, cursor_pos, prefix, prefix_start);
+
+    state->completion_prefix = prefix;
+    state->completion_prefix_start = prefix_start;
+    state->completions.clear();
+    state->autocomplete_idx = 0;
+
+    if (prefix.empty()) {
+        state->show_autocomplete = false;
+        return;
+    }
+
+    int plen = (int)prefix.size();
+    const char** kws = rfui_get_keywords();
+    for (int i = 0; kws[i]; i++) {
+        if (strncmp(kws[i], prefix.c_str(), plen) == 0 && (int)strlen(kws[i]) > plen)
+            state->completions.push_back(kws[i]);
+    }
+    const char** bis = rfui_get_builtins();
+    for (int i = 0; bis[i]; i++) {
+        if (strncmp(bis[i], prefix.c_str(), plen) == 0 && (int)strlen(bis[i]) > plen)
+            state->completions.push_back(bis[i]);
+    }
+
+    std::sort(state->completions.begin(), state->completions.end());
+    state->show_autocomplete = !state->completions.empty();
+}
+
+// Apply selected completion into the input buffer
+static void apply_completion(ImGuiInputTextCallbackData* data, repl_state_t* state) {
+    if (state->completions.empty()) return;
+    int idx = state->autocomplete_idx;
+    if (idx < 0 || idx >= (int)state->completions.size()) idx = 0;
+
+    const std::string& word = state->completions[idx];
+    int prefix_len = (int)state->completion_prefix.size();
+    int start = state->completion_prefix_start;
+
+    // Replace prefix with full word
+    data->DeleteChars(start, prefix_len);
+    data->InsertChars(start, word.c_str());
+
+    state->show_autocomplete = false;
+    state->completions.clear();
+}
+
+// Input callback handling history, completion, and always (for arrow keys)
 static int input_callback(ImGuiInputTextCallbackData* data) {
     repl_state_t* state = (repl_state_t*)data->UserData;
     if (!state) return 0;
 
+    if (data->EventFlag == ImGuiInputTextFlags_CallbackCompletion) {
+        // Tab pressed
+        if (state->show_autocomplete && !state->completions.empty()) {
+            apply_completion(data, state);
+        } else {
+            update_completions(state, data->Buf, data->CursorPos);
+        }
+        return 0;
+    }
+
     if (data->EventFlag == ImGuiInputTextFlags_CallbackHistory) {
+        // If autocomplete popup is open, use arrows to navigate it
+        if (state->show_autocomplete && !state->completions.empty()) {
+            if (data->EventKey == ImGuiKey_UpArrow) {
+                if (state->autocomplete_idx > 0)
+                    state->autocomplete_idx--;
+            } else if (data->EventKey == ImGuiKey_DownArrow) {
+                if (state->autocomplete_idx < (int)state->completions.size() - 1)
+                    state->autocomplete_idx++;
+            }
+            return 0;
+        }
+
+        // Normal history navigation
         int history_size = (int)state->history.size();
         if (history_size == 0) return 0;
 
@@ -227,9 +343,73 @@ static int input_callback(ImGuiInputTextCallbackData* data) {
 
         data->DeleteChars(0, data->BufTextLen);
         data->InsertChars(0, new_text);
+        return 0;
+    }
+
+    if (data->EventFlag == ImGuiInputTextFlags_CallbackEdit) {
+        // Text changed — update completions
+        update_completions(state, data->Buf, data->CursorPos);
+        return 0;
+    }
+
+    if (data->EventFlag == ImGuiInputTextFlags_CallbackAlways) {
+        // Dismiss autocomplete on Escape
+        if (state->show_autocomplete && ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            state->show_autocomplete = false;
+            state->completions.clear();
+        }
+        return 0;
     }
 
     return 0;
+}
+
+// Render the autocomplete popup
+static void render_autocomplete_popup(repl_state_t* state, ImVec2 input_pos) {
+    if (!state->show_autocomplete || state->completions.empty()) return;
+
+    ImGui::SetNextWindowPos(ImVec2(input_pos.x, input_pos.y + ImGui::GetTextLineHeightWithSpacing()));
+    ImGui::SetNextWindowSize(ImVec2(200, 0));  // auto-height
+
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                              ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+                              ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoFocusOnAppearing;
+
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(4, 4));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 4.0f);
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.118f, 0.137f, 0.161f, 0.95f));
+    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.188f, 0.212f, 0.239f, 1.0f));
+
+    if (ImGui::Begin("##autocomplete", nullptr, flags)) {
+        int max_show = 8;
+        int count = (int)state->completions.size();
+        int show = count < max_show ? count : max_show;
+
+        for (int i = 0; i < show; i++) {
+            bool selected = (i == state->autocomplete_idx);
+            if (selected) {
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
+                // Highlight background
+                ImVec2 p = ImGui::GetCursorScreenPos();
+                ImVec2 size(ImGui::GetContentRegionAvail().x, ImGui::GetTextLineHeightWithSpacing());
+                ImGui::GetWindowDrawList()->AddRectFilled(p, ImVec2(p.x + size.x, p.y + size.y),
+                    IM_COL32(88, 166, 255, 60), 3.0f);
+            }
+            ImGui::TextUnformatted(state->completions[i].c_str());
+            if (selected) {
+                ImGui::PopStyleColor();
+            }
+        }
+        if (count > max_show) {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.545f, 0.580f, 0.620f, 1.0f));
+            ImGui::Text("  +%d more", count - max_show);
+            ImGui::PopStyleColor();
+        }
+    }
+    ImGui::End();
+
+    ImGui::PopStyleColor(2);
+    ImGui::PopStyleVar(2);
 }
 
 extern "C" {
@@ -241,6 +421,11 @@ nil_t rfui_repl_init(nil_t) {
     g_repl->input_buf[0] = '\0';
     g_repl->history_pos = -1;
     g_repl->scroll_to_bottom = true;
+    g_repl->console_scroll_to_bottom = false;
+    g_repl->focus_next_frame = false;
+    g_repl->show_autocomplete = false;
+    g_repl->autocomplete_idx = 0;
+    g_repl->completion_prefix_start = 0;
 }
 
 nil_t rfui_repl_render(nil_t) {
@@ -253,126 +438,193 @@ nil_t rfui_repl_render(nil_t) {
     ImVec4 result_color(0.902f, 0.929f, 0.953f, 1.0f);  // #E6EDF3
     ImVec4 error_color(0.973f, 0.318f, 0.286f, 1.0f);   // #F85149
 
-    // Single scrollable region for entire terminal
-    ImGui::BeginChild("##terminal", ImVec2(0, 0), false,
-                      ImGuiWindowFlags_HorizontalScrollbar);
+    bool want_focus = ImGui::IsWindowAppearing() || state->scroll_to_bottom;
+    bool mouse_clicked = ImGui::IsMouseClicked(0);
 
-    // Display all previous lines (with ANSI escape sequence support)
-    for (const terminal_line_t& line : state->lines) {
-        ImVec4 base_color;
-        switch (line.type) {
-            case LINE_INPUT: base_color = prompt_color; break;
-            case LINE_ERROR: base_color = error_color;  break;
-            default:         base_color = result_color;  break;
-        }
-        render_ansi_text(line.text.c_str(), base_color);
-    }
+    // Tab bar: REPL + Console
+    if (ImGui::BeginTabBar("##repl_tabs")) {
+        if (ImGui::BeginTabItem("REPL")) {
+            // Single scrollable region for entire terminal
+            ImGui::BeginChild("##terminal", ImVec2(0, 0), false,
+                              ImGuiWindowFlags_HorizontalScrollbar);
 
-    // Subtle separator between output and input
-    if (!state->lines.empty()) {
-        ImGui::PushStyleColor(ImGuiCol_Separator, ImVec4(0.188f, 0.212f, 0.239f, 1.0f));
-        ImGui::Separator();
-        ImGui::PopStyleColor();
-    }
-
-    // Current input line: prompt + input field on same line
-    ImGui::PushStyleColor(ImGuiCol_Text, prompt_color);
-    ImGui::TextUnformatted(ICON_PROMPT " ");
-    ImGui::PopStyleColor();
-    ImGui::SameLine(0, 0);
-
-    // Make input field blend with terminal (no frame, no border, no highlight)
-    // Text color is transparent — we overlay syntax-highlighted text on top
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 0));
-    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
-    ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0, 0, 0, 0));
-    ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(0, 0, 0, 0));
-    ImGui::PushStyleColor(ImGuiCol_FrameBgActive, ImVec4(0, 0, 0, 0));
-    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0, 0, 0, 0));
-    ImGui::PushStyleColor(ImGuiCol_NavHighlight, ImVec4(0, 0, 0, 0));
-    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0, 0, 0, 0));  // transparent text
-
-    // Focus input on any click within the terminal area
-    if (ImGui::IsWindowAppearing() || state->scroll_to_bottom ||
-        (ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) && ImGui::IsMouseClicked(0))) {
-        ImGui::SetKeyboardFocusHere();
-    }
-
-    ImGui::SetNextItemWidth(-1);
-    ImGuiInputTextFlags flags = ImGuiInputTextFlags_EnterReturnsTrue |
-                                 ImGuiInputTextFlags_CallbackHistory;
-
-    bool enter_pressed = ImGui::InputText("##input", state->input_buf,
-                                           sizeof(state->input_buf), flags,
-                                           input_callback, state);
-
-    // Overlay syntax-highlighted text on top of the invisible InputText
-    if (state->input_buf[0] != '\0') {
-        ImVec2 text_pos = ImGui::GetItemRectMin();
-        ImDrawList* draw_list = ImGui::GetWindowDrawList();
-        ImFont* font = ImGui::GetFont();
-        float font_size = ImGui::GetFontSize();
-
-        rfui_token_t tokens[512];
-        int ntok = rfui_tokenize(state->input_buf, tokens, 512);
-
-        for (int t = 0; t < ntok; t++) {
-            const char* tok_start = state->input_buf + tokens[t].start;
-            const char* tok_end = tok_start + tokens[t].len;
-            ImVec4 color = rfui_token_color(tokens[t].type);
-
-            // Compute X offset: measure text up to this token's start
-            float x_off = 0.0f;
-            if (tokens[t].start > 0) {
-                x_off = font->CalcTextSizeA(font_size, FLT_MAX, -1.0f,
-                            state->input_buf, state->input_buf + tokens[t].start).x;
+            // Display all previous lines (with ANSI escape sequence support)
+            for (const terminal_line_t& line : state->lines) {
+                ImVec4 base_color;
+                switch (line.type) {
+                    case LINE_INPUT: base_color = prompt_color; break;
+                    case LINE_ERROR: base_color = error_color;  break;
+                    default:         base_color = result_color;  break;
+                }
+                render_ansi_text(line.text.c_str(), base_color);
             }
 
-            draw_list->AddText(font, font_size,
-                ImVec2(text_pos.x + x_off, text_pos.y),
-                ImGui::ColorConvertFloat4ToU32(color),
-                tok_start, tok_end);
-        }
-    }
-
-    ImGui::PopStyleColor(6);
-    ImGui::PopStyleVar(2);
-
-    // Handle Enter
-    if (enter_pressed && state->input_buf[0] != '\0') {
-        std::string input(state->input_buf);
-
-        // Add to command history
-        if (state->history.empty() || state->history.back() != input) {
-            if ((int)state->history.size() >= MAX_HISTORY_SIZE) {
-                state->history.erase(state->history.begin());
+            // Subtle separator between output and input
+            if (!state->lines.empty()) {
+                ImGui::PushStyleColor(ImGuiCol_Separator, ImVec4(0.188f, 0.212f, 0.239f, 1.0f));
+                ImGui::Separator();
+                ImGui::PopStyleColor();
             }
-            state->history.push_back(input);
+
+            // Current input line: prompt + input field on same line
+            ImGui::PushStyleColor(ImGuiCol_Text, prompt_color);
+            ImGui::TextUnformatted(ICON_PROMPT " ");
+            ImGui::PopStyleColor();
+            ImGui::SameLine(0, 0);
+
+            // Make input field blend with terminal (no frame, no border, no highlight)
+            // Text color is transparent — we overlay syntax-highlighted text on top
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 0));
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
+            ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0, 0, 0, 0));
+            ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(0, 0, 0, 0));
+            ImGui::PushStyleColor(ImGuiCol_FrameBgActive, ImVec4(0, 0, 0, 0));
+            ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0, 0, 0, 0));
+            ImGui::PushStyleColor(ImGuiCol_NavHighlight, ImVec4(0, 0, 0, 0));
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0, 0, 0, 0));  // transparent text
+
+            // Focus input: apply deferred focus from previous frame's click,
+            // or immediate focus on window appear / scroll-to-bottom.
+            if (want_focus || state->focus_next_frame) {
+                ImGui::SetKeyboardFocusHere();
+                state->focus_next_frame = false;
+            }
+            // Detect click this frame → set flag for NEXT frame (deferred,
+            // because ImGui overrides focus when processing the child click).
+            if (mouse_clicked) {
+                ImVec2 mp = ImGui::GetMousePos();
+                ImVec2 wmin = ImGui::GetWindowPos();
+                ImVec2 wmax(wmin.x + ImGui::GetWindowSize().x,
+                            wmin.y + ImGui::GetWindowSize().y);
+                if (mp.x >= wmin.x && mp.x <= wmax.x &&
+                    mp.y >= wmin.y && mp.y <= wmax.y) {
+                    state->focus_next_frame = true;
+                }
+            }
+
+            ImGui::SetNextItemWidth(-1);
+            ImGuiInputTextFlags flags = ImGuiInputTextFlags_EnterReturnsTrue |
+                                         ImGuiInputTextFlags_CallbackHistory |
+                                         ImGuiInputTextFlags_CallbackCompletion |
+                                         ImGuiInputTextFlags_CallbackEdit |
+                                         ImGuiInputTextFlags_CallbackAlways;
+
+            bool enter_pressed = ImGui::InputText("##input", state->input_buf,
+                                                   sizeof(state->input_buf), flags,
+                                                   input_callback, state);
+
+            // Record input position for autocomplete popup
+            ImVec2 input_pos = ImGui::GetItemRectMin();
+
+            // Overlay syntax-highlighted text on top of the invisible InputText
+            if (state->input_buf[0] != '\0') {
+                ImVec2 text_pos = ImGui::GetItemRectMin();
+                ImDrawList* draw_list = ImGui::GetWindowDrawList();
+                ImFont* font = ImGui::GetFont();
+                float font_size = ImGui::GetFontSize();
+
+                rfui_token_t tokens[512];
+                int ntok = rfui_tokenize(state->input_buf, tokens, 512);
+
+                for (int t = 0; t < ntok; t++) {
+                    const char* tok_start = state->input_buf + tokens[t].start;
+                    const char* tok_end = tok_start + tokens[t].len;
+                    ImVec4 color = rfui_token_color(tokens[t].type);
+
+                    // Compute X offset: measure text up to this token's start
+                    float x_off = 0.0f;
+                    if (tokens[t].start > 0) {
+                        x_off = font->CalcTextSizeA(font_size, FLT_MAX, -1.0f,
+                                    state->input_buf, state->input_buf + tokens[t].start).x;
+                    }
+
+                    draw_list->AddText(font, font_size,
+                        ImVec2(text_pos.x + x_off, text_pos.y),
+                        ImGui::ColorConvertFloat4ToU32(color),
+                        tok_start, tok_end);
+                }
+            }
+
+            ImGui::PopStyleColor(6);
+            ImGui::PopStyleVar(2);
+
+            // Handle Enter — dismiss autocomplete and submit
+            if (enter_pressed && state->input_buf[0] != '\0') {
+                state->show_autocomplete = false;
+                state->completions.clear();
+
+                std::string input(state->input_buf);
+
+                // Add to command history
+                if (state->history.empty() || state->history.back() != input) {
+                    if ((int)state->history.size() >= MAX_HISTORY_SIZE) {
+                        state->history.erase(state->history.begin());
+                    }
+                    state->history.push_back(input);
+                }
+
+                // Add input line to terminal
+                if ((int)state->lines.size() >= MAX_OUTPUT_LINES) {
+                    state->lines.erase(state->lines.begin());
+                }
+                state->lines.push_back({std::string(ICON_PROMPT " ") + input, LINE_INPUT});
+
+                // Evaluate
+                rfui_eval(state->input_buf);
+
+                // Clear
+                state->input_buf[0] = '\0';
+                state->history_pos = -1;
+                state->saved_input.clear();
+                state->scroll_to_bottom = true;
+            }
+
+            // Auto-scroll
+            if (state->scroll_to_bottom) {
+                ImGui::SetScrollHereY(1.0f);
+                state->scroll_to_bottom = false;
+            }
+
+            ImGui::EndChild();
+
+            // Render autocomplete popup (outside the child, so it floats)
+            render_autocomplete_popup(state, input_pos);
+
+            ImGui::EndTabItem();
         }
 
-        // Add input line to terminal
-        if ((int)state->lines.size() >= MAX_OUTPUT_LINES) {
-            state->lines.erase(state->lines.begin());
+        if (ImGui::BeginTabItem("Console")) {
+            // Optional clear button
+            if (ImGui::SmallButton("Clear")) {
+                state->console_lines.clear();
+            }
+            ImGui::Separator();
+
+            ImGui::BeginChild("##console", ImVec2(0, 0), false,
+                              ImGuiWindowFlags_HorizontalScrollbar);
+
+            for (const console_line_t& line : state->console_lines) {
+                ImVec4 color;
+                switch (line.level) {
+                    case LOG_DEBUG: color = ImVec4(0.545f, 0.580f, 0.620f, 1.0f); break; // gray
+                    case LOG_WARN:  color = ImVec4(0.941f, 0.769f, 0.290f, 1.0f); break; // yellow
+                    case LOG_ERROR: color = ImVec4(0.973f, 0.318f, 0.286f, 1.0f); break; // red
+                    default:        color = ImVec4(0.902f, 0.929f, 0.953f, 1.0f); break; // white
+                }
+                render_ansi_text(line.text.c_str(), color);
+            }
+
+            if (state->console_scroll_to_bottom) {
+                ImGui::SetScrollHereY(1.0f);
+                state->console_scroll_to_bottom = false;
+            }
+
+            ImGui::EndChild();
+            ImGui::EndTabItem();
         }
-        state->lines.push_back({std::string(ICON_PROMPT " ") + input, LINE_INPUT});
 
-        // Evaluate
-        rfui_eval(state->input_buf);
-
-        // Clear
-        state->input_buf[0] = '\0';
-        state->history_pos = -1;
-        state->saved_input.clear();
-        state->scroll_to_bottom = true;
+        ImGui::EndTabBar();
     }
-
-    // Auto-scroll
-    if (state->scroll_to_bottom) {
-        ImGui::SetScrollHereY(1.0f);
-        state->scroll_to_bottom = false;
-    }
-
-    ImGui::EndChild();
 }
 
 nil_t rfui_repl_add_result_text(const char* text) {
@@ -389,6 +641,22 @@ nil_t rfui_repl_add_result_text(const char* text) {
     }
     g_repl->lines.push_back({std::string(text), type});
     g_repl->scroll_to_bottom = true;
+}
+
+nil_t rfui_repl_add_log(const char* text, int level) {
+    if (!g_repl || !text) return;
+
+    LogLevel lvl = LOG_INFO;
+    if (level <= 0) lvl = LOG_DEBUG;
+    else if (level == 1) lvl = LOG_INFO;
+    else if (level == 2) lvl = LOG_WARN;
+    else lvl = LOG_ERROR;
+
+    if ((int)g_repl->console_lines.size() >= MAX_CONSOLE_LINES) {
+        g_repl->console_lines.erase(g_repl->console_lines.begin());
+    }
+    g_repl->console_lines.push_back({std::string(text), lvl});
+    g_repl->console_scroll_to_bottom = true;
 }
 
 nil_t rfui_repl_load_file(const char* path) {

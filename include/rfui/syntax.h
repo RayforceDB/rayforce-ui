@@ -27,6 +27,10 @@ typedef struct {
 // Tokenize a Rayfall expression. Returns number of tokens written.
 int rfui_tokenize(const char* text, rfui_token_t* tokens, int max_tokens);
 
+// Get NULL-terminated arrays of completion candidates
+const char** rfui_get_keywords(void);
+const char** rfui_get_builtins(void);
+
 #ifdef __cplusplus
 }
 

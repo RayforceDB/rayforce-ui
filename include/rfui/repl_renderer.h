@@ -20,6 +20,10 @@ nil_t rfui_repl_add_result_text(const char* text);
 // Load a script file via REPL (shows in history, evaluates)
 nil_t rfui_repl_load_file(const char* path);
 
+// Add a log message to the Console tab
+// level: 0=debug(gray), 1=info(white), 2=warn(yellow), 3=error(red)
+nil_t rfui_repl_add_log(const char* text, int level);
+
 // Destroy REPL state
 nil_t rfui_repl_destroy(nil_t);
 
