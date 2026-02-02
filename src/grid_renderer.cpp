@@ -508,14 +508,14 @@ nil_t rfui_render_grid(rfui_widget_t* widget) {
                         ImGui::SameLine();
                     }
 
-                    // Check overlay rules for this row
+                    // Check overlay rules for this cell
                     bool cell_colored = false;
                     for (int oi = 0; oi < ov_count; oi++) {
                         rfui_color_overlay_t* ov = &widget->overlays[ov_front][oi];
+                        if (ov->col_idx != -1 && ov->col_idx != col_idx) continue;
                         if (ov->mask && row < ov->mask->len) {
                             if (AS_B8(ov->mask)[row]) {
                                 u32_t c = ov->color;
-                                // Unpack RGBA: color stored as 0xRRGGBB
                                 float r = ((c >> 16) & 0xFF) / 255.0f;
                                 float g = ((c >> 8) & 0xFF) / 255.0f;
                                 float b = (c & 0xFF) / 255.0f;

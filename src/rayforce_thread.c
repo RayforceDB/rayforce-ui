@@ -536,7 +536,16 @@ static void evaluate_rules(rfui_widget_t* w, obj_p final_data) {
         if (result->type == TYPE_B8) {
             if (rule->color && w->num_overlays[back] < MAX_RULES) {
                 rfui_color_overlay_t* ov = &w->overlays[back][w->num_overlays[back]++];
-                ov->col_idx = -1;  // whole row
+                // Find which column the rule expression references
+                i64_t matched_col = -1;  // -1 = whole row (fallback)
+                for (i64_t c = 0; c < ncols; c++) {
+                    const char* name = str_from_symbol(AS_SYMBOL(keys)[c]);
+                    if (name && strstr(rule->expr, name)) {
+                        matched_col = c;
+                        break;
+                    }
+                }
+                ov->col_idx = matched_col;
                 ov->mask = result; // take ownership
                 ov->color = rule->color;
             } else if (rule->fn) {
