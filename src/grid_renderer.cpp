@@ -420,45 +420,28 @@ nil_t rfui_render_grid(rfui_widget_t* widget) {
         // Freeze header row
         ImGui::TableSetupScrollFreeze(0, 1);
 
-        // Custom header row with dropdown chevrons
-        ImGui::TableNextRow(ImGuiTableRowFlags_Headers);
-        for (i64_t ci = 0; ci < ncols; ci++) {
-            ImGui::TableSetColumnIndex((int)ci);
+        // Standard header row — right-click opens per-column context menu
+        ImGui::TableHeadersRow();
+
+        // Per-column context menus (right-click on header)
+        for (i64_t ci = 0; ci < ncols && ci < MAX_COLS; ci++) {
+            ImGui::PushID((int)ci);
             const char* col_name = str_from_symbol(AS_SYMBOL(keys)[ci]);
             if (!col_name) col_name = "?";
 
-            // Header text
-            ImGui::Text("%s", col_name);
-
-            // Sort indicator
-            if (ci < MAX_COLS && widget->col_rules[ci].sort_dir != 0) {
-                ImGui::SameLine();
-                ImGui::TextDisabled(widget->col_rules[ci].sort_dir > 0 ? ICON_SORT_UP : ICON_SORT_DOWN);
-            }
-
-            // Rule count indicator
-            if (ci < MAX_COLS && widget->col_rules[ci].num_rules > 0) {
-                ImGui::SameLine();
-                ImGui::TextColored(ImVec4(1.0f, 0.72f, 0.0f, 1.0f), ICON_PALETTE);
-            }
-
-            // Chevron dropdown button
-            ImGui::SameLine();
-            ImGui::PushID((int)ci);
             char popup_id[32];
             snprintf(popup_id, sizeof(popup_id), "col_menu_%d", (int)ci);
-            if (ImGui::SmallButton(ICON_CHEVRON_DN)) {
+
+            // Open context menu on right-click of column header
+            if (ImGui::TableSetColumnIndex((int)ci)) {
+                // Check if this column header was right-clicked
+            }
+            // Use TableGetColumnFlags to detect header hover + right-click
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
                 ImGui::OpenPopup(popup_id);
             }
 
-            // Column popup menu
             if (ImGui::BeginPopup(popup_id)) {
-                if (ci >= MAX_COLS) {
-                    ImGui::TextDisabled("Column index exceeds limit");
-                    ImGui::EndPopup();
-                    ImGui::PopID();
-                    continue;
-                }
                 ImGui::Text("%s", col_name);
                 ImGui::Separator();
 
@@ -492,7 +475,7 @@ nil_t rfui_render_grid(rfui_widget_t* widget) {
 
                 ImGui::Separator();
 
-                // Add color rule
+                // Add color rule — sets state and closes popup; builder opens next frame
                 if (widget->col_rules[ci].num_rules < MAX_COL_RULES) {
                     if (ImGui::Selectable(ICON_PLUS " Add Color Rule...")) {
                         if (ui_state) {
@@ -505,14 +488,14 @@ nil_t rfui_render_grid(rfui_widget_t* widget) {
                             ui_state->builder_color[1] = 0.32f;
                             ui_state->builder_color[2] = 0.29f;
                         }
-                        ImGui::OpenPopup("RuleBuilder");
+                        // Selectable closes the popup; builder window opens below
                     }
                 }
 
                 ImGui::Separator();
 
                 // Active rules for this column
-                if (ci < MAX_COLS && widget->col_rules[ci].num_rules > 0) {
+                if (widget->col_rules[ci].num_rules > 0) {
                     ImGui::TextDisabled("Active Rules:");
                     rfui_col_rules_t* cr = &widget->col_rules[ci];
                     for (int ri = 0; ri < cr->num_rules; ri++) {
@@ -540,75 +523,81 @@ nil_t rfui_render_grid(rfui_widget_t* widget) {
                     }
                 }
 
-                // Rule builder sub-popup
-                if (ImGui::BeginPopup("RuleBuilder")) {
-                    if (ui_state && ui_state->editing_col == (int)ci) {
-                        ImGui::Text("New Color Rule - %s", col_name);
-                        ImGui::Separator();
-
-                        ImGui::SetNextItemWidth(80);
-                        if (ImGui::BeginCombo("##op", op_names[ui_state->builder_op])) {
-                            for (int oi = 0; oi < op_count; oi++) {
-                                if (ImGui::Selectable(op_names[oi], ui_state->builder_op == oi))
-                                    ui_state->builder_op = oi;
-                            }
-                            ImGui::EndCombo();
-                        }
-
-                        ImGui::SameLine();
-                        if (ui_state->builder_op == RFUI_OP_WITHIN) {
-                            ImGui::SetNextItemWidth(80);
-                            ImGui::InputText("##v1", ui_state->builder_value, sizeof(ui_state->builder_value));
-                            ImGui::SameLine();
-                            ImGui::Text("to");
-                            ImGui::SameLine();
-                            ImGui::SetNextItemWidth(80);
-                            ImGui::InputText("##v2", ui_state->builder_value2, sizeof(ui_state->builder_value2));
-                        } else if (ui_state->builder_op == RFUI_OP_IN) {
-                            ImGui::SetNextItemWidth(200);
-                            ImGui::InputText("##vals", ui_state->builder_value, sizeof(ui_state->builder_value));
-                            ImGui::TextDisabled("Space-separated: 'AAPL 'MSFT 'GOOG");
-                        } else {
-                            ImGui::SetNextItemWidth(120);
-                            ImGui::InputText("##val", ui_state->builder_value, sizeof(ui_state->builder_value));
-                        }
-
-                        ImGui::ColorEdit3("Color", ui_state->builder_color,
-                            ImGuiColorEditFlags_NoInputs);
-
-                        if (ImGui::Button("Add")) {
-                            rfui_col_rules_t* cr = &widget->col_rules[ci];
-                            if (cr->num_rules < MAX_COL_RULES) {
-                                rfui_rule_t* nr = &cr->rules[cr->num_rules++];
-                                nr->op = (i8_t)ui_state->builder_op;
-                                if (ui_state->builder_op == RFUI_OP_WITHIN) {
-                                    snprintf(nr->value, sizeof(nr->value), "%s %s",
-                                        ui_state->builder_value, ui_state->builder_value2);
-                                } else {
-                                    strncpy(nr->value, ui_state->builder_value, sizeof(nr->value) - 1);
-                                    nr->value[sizeof(nr->value) - 1] = '\0';
-                                }
-                                nr->color = ((u32_t)(ui_state->builder_color[0] * 255) << 16) |
-                                            ((u32_t)(ui_state->builder_color[1] * 255) << 8) |
-                                            (u32_t)(ui_state->builder_color[2] * 255);
-                                nr->fn = nullptr;
-                                send_col_rules(widget, ci);
-                            }
-                            ui_state->editing_col = -1;
-                            ImGui::CloseCurrentPopup();
-                        }
-                        ImGui::SameLine();
-                        if (ImGui::Button("Cancel")) {
-                            ui_state->editing_col = -1;
-                            ImGui::CloseCurrentPopup();
-                        }
-                    }
-                    ImGui::EndPopup();
-                }
-
                 ImGui::EndPopup();
             }
             ImGui::PopID();
+        }
+
+        // Rule builder window — rendered outside any popup context
+        if (ui_state && ui_state->editing_col >= 0 && ui_state->editing_col < (int)ncols
+            && ui_state->editing_col < MAX_COLS) {
+            i64_t ci = ui_state->editing_col;
+            const char* col_name = str_from_symbol(AS_SYMBOL(keys)[ci]);
+            if (!col_name) col_name = "?";
+
+            char win_title[64];
+            snprintf(win_title, sizeof(win_title), "Add Rule - %s###RuleBuilder", col_name);
+
+            bool open = true;
+            ImGui::SetNextWindowSize(ImVec2(320, 0), ImGuiCond_FirstUseEver);
+            if (ImGui::Begin(win_title, &open, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse)) {
+                // Operator combo
+                ImGui::SetNextItemWidth(80);
+                if (ImGui::BeginCombo("Op", op_names[ui_state->builder_op])) {
+                    for (int oi = 0; oi < op_count; oi++) {
+                        if (ImGui::Selectable(op_names[oi], ui_state->builder_op == oi))
+                            ui_state->builder_op = oi;
+                    }
+                    ImGui::EndCombo();
+                }
+
+                // Value input(s)
+                if (ui_state->builder_op == RFUI_OP_WITHIN) {
+                    ImGui::SetNextItemWidth(100);
+                    ImGui::InputText("From", ui_state->builder_value, sizeof(ui_state->builder_value));
+                    ImGui::SetNextItemWidth(100);
+                    ImGui::InputText("To", ui_state->builder_value2, sizeof(ui_state->builder_value2));
+                } else if (ui_state->builder_op == RFUI_OP_IN) {
+                    ImGui::SetNextItemWidth(200);
+                    ImGui::InputText("Values", ui_state->builder_value, sizeof(ui_state->builder_value));
+                    ImGui::TextDisabled("Space-separated: 'AAPL 'MSFT 'GOOG");
+                } else {
+                    ImGui::SetNextItemWidth(140);
+                    ImGui::InputText("Value", ui_state->builder_value, sizeof(ui_state->builder_value));
+                }
+
+                // Color picker
+                ImGui::ColorEdit3("Color", ui_state->builder_color,
+                    ImGuiColorEditFlags_NoInputs);
+
+                // Add / Cancel
+                if (ImGui::Button("Add")) {
+                    rfui_col_rules_t* cr = &widget->col_rules[ci];
+                    if (cr->num_rules < MAX_COL_RULES) {
+                        rfui_rule_t* nr = &cr->rules[cr->num_rules++];
+                        nr->op = (i8_t)ui_state->builder_op;
+                        if (ui_state->builder_op == RFUI_OP_WITHIN) {
+                            snprintf(nr->value, sizeof(nr->value), "%s %s",
+                                ui_state->builder_value, ui_state->builder_value2);
+                        } else {
+                            strncpy(nr->value, ui_state->builder_value, sizeof(nr->value) - 1);
+                            nr->value[sizeof(nr->value) - 1] = '\0';
+                        }
+                        nr->color = ((u32_t)(ui_state->builder_color[0] * 255) << 16) |
+                                    ((u32_t)(ui_state->builder_color[1] * 255) << 8) |
+                                    (u32_t)(ui_state->builder_color[2] * 255);
+                        nr->fn = nullptr;
+                        send_col_rules(widget, ci);
+                    }
+                    ui_state->editing_col = -1;
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Cancel")) {
+                    ui_state->editing_col = -1;
+                }
+            }
+            ImGui::End();
+            if (!open) ui_state->editing_col = -1;
         }
 
         // Use ListClipper for virtualized row rendering
