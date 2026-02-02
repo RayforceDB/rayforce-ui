@@ -177,7 +177,7 @@ i32_t rfui_ui_init(nil_t) {
     rfui_theme_apply();
 
     // Load Space Mono + FontAwesome as the single UI font (index 0)
-    float font_size = 32.0f;
+    float font_size = 36.0f;
     ImFontConfig font_cfg;
     font_cfg.FontDataOwnedByAtlas = false;
     io.Fonts->AddFontFromMemoryTTF((void*)embed_SpaceMono_Bold_ttf, embed_SpaceMono_Bold_ttf_len, font_size, &font_cfg);
@@ -193,7 +193,7 @@ i32_t rfui_ui_init(nil_t) {
     io.Fonts->AddFontFromMemoryTTF((void*)embed_fa_solid_900_otf, embed_fa_solid_900_otf_len, icon_size, &icon_cfg, icon_ranges);
 
     // Large Space Mono for text/label widgets (index 1)
-    float large_font_size = 72.0f;
+    float large_font_size = 80.0f;
     ImFontConfig large_cfg;
     large_cfg.FontDataOwnedByAtlas = false;
     io.Fonts->AddFontFromMemoryTTF((void*)embed_SpaceMono_Bold_ttf, embed_SpaceMono_Bold_ttf_len, large_font_size, &large_cfg);
@@ -383,7 +383,7 @@ i32_t rfui_ui_run(nil_t) {
             // App title (left side) — bolt in default font, text in Orbitron
             ImGui::SetCursorScreenPos(ImVec2(title_min.x + 12.0f,
                                               title_min.y + (title_h - ImGui::GetFontSize()) * 0.5f));
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.8f, 0.2f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.914f, 0.627f, 0.200f, 1.0f));
             ImGui::TextUnformatted("\xe2\x9a\xa1");
             ImGui::PopStyleColor();
             ImGui::SameLine(0, 4.0f);
@@ -401,6 +401,7 @@ i32_t rfui_ui_run(nil_t) {
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(1, 1, 1, 0.2f));
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.545f, 0.580f, 0.620f, 1.0f));
             ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 0.0f);
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
 
             // Open script
             ImGui::SetCursorScreenPos(ImVec2(btn_x, title_min.y));
@@ -433,7 +434,7 @@ i32_t rfui_ui_run(nil_t) {
                 glfwSetWindowShouldClose(g_window, GLFW_TRUE);
             }
             ImGui::PopStyleColor(4);
-            ImGui::PopStyleVar();
+            ImGui::PopStyleVar(2);
 
             // Title bar drag-to-move (only in the non-button area)
             ImGui::SetCursorScreenPos(title_min);
