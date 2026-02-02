@@ -4,10 +4,8 @@
 #include <string.h>
 #include <stdio.h>
 
-// strdup is POSIX, not C standard - provide explicit declaration
 extern char* strdup(const char* s);
 
-// Buffer size for widget formatting
 #define WIDGET_FORMAT_BUF_SIZE 256
 
 const char* rfui_widget_type_name(rfui_widget_type_t type) {
@@ -17,6 +15,34 @@ const char* rfui_widget_type_name(rfui_widget_type_t type) {
         case RFUI_WIDGET_TEXT:  return "text";
         case RFUI_WIDGET_ALERT: return "alert";
         default: return "unknown";
+    }
+}
+
+const char* rfui_op_str(rfui_op_t op) {
+    switch (op) {
+        case RFUI_OP_GT:     return ">";
+        case RFUI_OP_LT:     return "<";
+        case RFUI_OP_GE:     return ">=";
+        case RFUI_OP_LE:     return "<=";
+        case RFUI_OP_EQ:     return "==";
+        case RFUI_OP_NE:     return "!=";
+        case RFUI_OP_IN:     return "in";
+        case RFUI_OP_WITHIN: return "within";
+        default: return "?";
+    }
+}
+
+const char* rfui_op_rayfall(rfui_op_t op) {
+    switch (op) {
+        case RFUI_OP_GT:     return ">";
+        case RFUI_OP_LT:     return "<";
+        case RFUI_OP_GE:     return ">=";
+        case RFUI_OP_LE:     return "<=";
+        case RFUI_OP_EQ:     return "==";
+        case RFUI_OP_NE:     return "!=";
+        case RFUI_OP_IN:     return "in";
+        case RFUI_OP_WITHIN: return "within";
+        default: return "?";
     }
 }
 
@@ -40,7 +66,7 @@ rfui_widget_t* rfui_widget_create(rfui_widget_type_t type, const char* name) {
     w->dock_id = 0;
     w->ui_state = NULL;
     w->render_data = NULL;
-    w->num_rules = 0;
+    memset(w->col_rules, 0, sizeof(w->col_rules));
     w->num_overlays[0] = 0;
     w->num_overlays[1] = 0;
     w->overlay_front = 0;
@@ -56,8 +82,10 @@ nil_t rfui_widget_destroy(rfui_widget_t* w) {
     if (w->post_query) drop_obj(w->post_query);
     if (w->on_select) drop_obj(w->on_select);
     if (w->render_data) drop_obj(w->render_data);
-    for (int i = 0; i < w->num_rules; i++) {
-        if (w->rules[i].fn) drop_obj(w->rules[i].fn);
+    for (int c = 0; c < MAX_COLS; c++) {
+        for (int i = 0; i < w->col_rules[c].num_rules; i++) {
+            if (w->col_rules[c].rules[i].fn) drop_obj(w->col_rules[c].rules[i].fn);
+        }
     }
     for (int b = 0; b < 2; b++) {
         for (int i = 0; i < w->num_overlays[b]; i++) {
