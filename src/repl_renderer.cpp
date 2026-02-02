@@ -76,168 +76,10 @@ struct repl_state_t {
 // Module-level REPL state (singleton — one REPL per application)
 static repl_state_t* g_repl = nullptr;
 
-// Standard ANSI 8-color palette
-static const ImVec4 ansi_colors[8] = {
-    ImVec4(0.0f,   0.0f,   0.0f,   1.0f),  // 0 black
-    ImVec4(0.804f, 0.141f, 0.114f, 1.0f),  // 1 red
-    ImVec4(0.247f, 0.725f, 0.314f, 1.0f),  // 2 green
-    ImVec4(0.824f, 0.600f, 0.133f, 1.0f),  // 3 yellow
-    ImVec4(0.345f, 0.651f, 1.000f, 1.0f),  // 4 blue
-    ImVec4(0.737f, 0.549f, 1.000f, 1.0f),  // 5 magenta
-    ImVec4(0.224f, 0.824f, 0.753f, 1.0f),  // 6 cyan
-    ImVec4(0.902f, 0.929f, 0.953f, 1.0f),  // 7 white
-};
+// ANSI color tables and render_ansi_text() from shared header
+#include "../include/rfui/ansi_text.h"
 
-// Bright ANSI colors (90-97)
-static const ImVec4 ansi_bright[8] = {
-    ImVec4(0.545f, 0.580f, 0.620f, 1.0f),  // 0 bright black (gray)
-    ImVec4(0.973f, 0.318f, 0.286f, 1.0f),  // 1 bright red
-    ImVec4(0.341f, 0.894f, 0.400f, 1.0f),  // 2 bright green
-    ImVec4(0.941f, 0.769f, 0.290f, 1.0f),  // 3 bright yellow
-    ImVec4(0.475f, 0.753f, 1.000f, 1.0f),  // 4 bright blue
-    ImVec4(0.847f, 0.694f, 1.000f, 1.0f),  // 5 bright magenta
-    ImVec4(0.388f, 0.922f, 0.855f, 1.0f),  // 6 bright cyan
-    ImVec4(1.000f, 1.000f, 1.000f, 1.0f),  // 7 bright white
-};
-
-// Render text with ANSI escape sequence support
-// Handles: ESC[0m (reset), ESC[1m (bold), ESC[3m (italic/dim),
-//          ESC[30-37m, ESC[90-97m (fg colors), ESC[38;5;Nm (256-color)
-static void render_ansi_text(const char* text, ImVec4 default_color) {
-    if (!text || !*text) return;
-
-    ImVec4 current_color = default_color;
-    bool bold = false;
-    bool has_custom_color = false;
-    const char* p = text;
-
-    while (*p) {
-        // Find next ESC or end
-        const char* span_start = p;
-        while (*p && !(*p == '\033' && *(p + 1) == '[')) {
-            p++;
-        }
-
-        // Render text span, splitting at newlines so SameLine
-        // only joins segments within the same line
-        if (p > span_start) {
-            const char* seg = span_start;
-            while (seg < p) {
-                // Find next newline within this span
-                const char* nl = seg;
-                while (nl < p && *nl != '\n') nl++;
-
-                if (nl > seg) {
-                    ImGui::PushStyleColor(ImGuiCol_Text, current_color);
-                    ImGui::TextUnformatted(seg, nl);
-                    ImGui::PopStyleColor();
-                    // Continue on same line unless next char is newline
-                    if (nl < p || *p) ImGui::SameLine(0, 0);
-                }
-
-                if (nl < p && *nl == '\n') {
-                    // Newline: break the SameLine chain
-                    ImGui::NewLine();
-                    nl++;
-                }
-                seg = nl;
-            }
-        }
-
-        if (!*p) break;
-
-        // Parse ESC[ ... m sequence
-        p += 2;  // skip ESC[
-        while (*p) {
-            // Parse number
-            int code = 0;
-            bool has_num = false;
-            while (*p >= '0' && *p <= '9') {
-                code = code * 10 + (*p - '0');
-                has_num = true;
-                p++;
-            }
-            if (!has_num) code = 0;
-
-            // Apply SGR code
-            if (code == 0) {
-                // Reset
-                current_color = default_color;
-                bold = false;
-                has_custom_color = false;
-            } else if (code == 1) {
-                bold = true;
-                // If we have a standard color, upgrade to bright
-                if (!has_custom_color) {
-                    current_color = default_color;
-                }
-            } else if (code == 2 || code == 3) {
-                // Dim/italic — slightly reduce alpha
-                current_color.w = 0.7f;
-            } else if (code == 4 || code == 9) {
-                // Underline/strikethrough — no ImGui support, ignore
-            } else if (code >= 30 && code <= 37) {
-                current_color = bold ? ansi_bright[code - 30] : ansi_colors[code - 30];
-                has_custom_color = true;
-            } else if (code == 39) {
-                current_color = default_color;
-                has_custom_color = false;
-            } else if (code >= 90 && code <= 97) {
-                current_color = ansi_bright[code - 90];
-                has_custom_color = true;
-            } else if (code == 38) {
-                // Extended color: 38;5;N (256-color) or 38;2;R;G;B (truecolor)
-                if (*p == ';') {
-                    p++;
-                    int mode = 0;
-                    while (*p >= '0' && *p <= '9') { mode = mode * 10 + (*p - '0'); p++; }
-                    if (mode == 5 && *p == ';') {
-                        // 256-color
-                        p++;
-                        int idx = 0;
-                        while (*p >= '0' && *p <= '9') { idx = idx * 10 + (*p - '0'); p++; }
-                        if (idx < 8) {
-                            current_color = ansi_colors[idx];
-                        } else if (idx < 16) {
-                            current_color = ansi_bright[idx - 8];
-                        } else if (idx < 232) {
-                            // 216-color cube: 16 + 36*r + 6*g + b
-                            int v = idx - 16;
-                            int r = v / 36; int g = (v % 36) / 6; int b = v % 6;
-                            current_color = ImVec4(r / 5.0f, g / 5.0f, b / 5.0f, 1.0f);
-                        } else {
-                            // Grayscale: 232-255 -> 8..238
-                            float gray = (float)(8 + (idx - 232) * 10) / 255.0f;
-                            current_color = ImVec4(gray, gray, gray, 1.0f);
-                        }
-                        has_custom_color = true;
-                    } else if (mode == 2 && *p == ';') {
-                        // Truecolor: 38;2;R;G;B
-                        int rgb[3] = {0, 0, 0};
-                        for (int i = 0; i < 3 && *p == ';'; i++) {
-                            p++;
-                            while (*p >= '0' && *p <= '9') { rgb[i] = rgb[i] * 10 + (*p - '0'); p++; }
-                        }
-                        current_color = ImVec4(rgb[0] / 255.0f, rgb[1] / 255.0f, rgb[2] / 255.0f, 1.0f);
-                        has_custom_color = true;
-                    }
-                }
-            }
-
-            if (*p == ';') {
-                p++;  // more codes follow
-            } else if (*p == 'm') {
-                p++;  // end of sequence
-                break;
-            } else {
-                // Malformed — skip to 'm' or end
-                while (*p && *p != 'm') p++;
-                if (*p == 'm') p++;
-                break;
-            }
-        }
-    }
-}
+// render_ansi_text() provided by ansi_text.h above
 
 static bool is_word_char_ac(char c) {
     return isalnum((unsigned char)c) || c == '_' || c == '-' || c == '?' || c == '!';
@@ -657,6 +499,23 @@ nil_t rfui_repl_add_result_text(const char* text) {
         g_repl->lines.erase(g_repl->lines.begin());
     }
     g_repl->lines.push_back({std::string(text), type});
+    g_repl->scroll_to_bottom = true;
+}
+
+nil_t rfui_repl_add_result_obj(obj_p obj) {
+    if (!g_repl || !obj || obj->type != TYPE_C8) return;
+    const char* text = AS_C8(obj);
+    i64_t len = obj->len;
+
+    LineType type = LINE_RESULT;
+    if (len > 0 && (text[0] == '!' || (len >= 5 && memcmp(text, "error", 5) == 0))) {
+        type = LINE_ERROR;
+    }
+
+    if ((int)g_repl->lines.size() >= MAX_OUTPUT_LINES) {
+        g_repl->lines.erase(g_repl->lines.begin());
+    }
+    g_repl->lines.push_back({std::string(text, len), type});
     g_repl->scroll_to_bottom = true;
 }
 

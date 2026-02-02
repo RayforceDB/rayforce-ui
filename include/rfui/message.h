@@ -19,7 +19,8 @@ typedef enum rfui_ui_msg_type_t {
 typedef enum rfui_ray_msg_type_t {
     RFUI_MSG_WIDGET_CREATED, // New widget panel
     RFUI_MSG_DRAW,           // Widget data update
-    RFUI_MSG_RESULT          // REPL result
+    RFUI_MSG_RESULT,         // REPL result
+    RFUI_MSG_ALERT           // Toast notification
 } rfui_ray_msg_type_t;
 
 // UI → Rayforce message
@@ -35,7 +36,6 @@ typedef struct rfui_ray_msg_t {
     rfui_ray_msg_type_t type;
     struct rfui_widget_t* widget;  // Target widget
     obj_p data;                      // Data for rendering
-    char* text;                      // Result text (owned, must free)
 } rfui_ray_msg_t;
 
 #endif // RFUI_MESSAGE_H

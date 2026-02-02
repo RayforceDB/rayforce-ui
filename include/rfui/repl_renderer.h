@@ -17,6 +17,9 @@ nil_t rfui_repl_render(nil_t);
 // Add result text to REPL output (called when MSG_RESULT received)
 nil_t rfui_repl_add_result_text(const char* text);
 
+// Add result from obj_p (TYPE_C8) — zero-copy read
+nil_t rfui_repl_add_result_obj(obj_p obj);
+
 // Load a script file via REPL (shows in history, evaluates)
 nil_t rfui_repl_load_file(const char* path);
 

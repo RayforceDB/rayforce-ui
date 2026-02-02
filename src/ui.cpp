@@ -44,6 +44,7 @@ extern "C" {
 #include "../include/rfui/queue.h"
 #include "../include/rfui/widget_registry.h"
 #include "../include/rfui/repl_renderer.h"
+#include "../include/rfui/toast.h"
 }
 
 // Maximum messages to process per frame to avoid blocking rendering
@@ -257,14 +258,9 @@ i32_t rfui_ui_run(nil_t) {
                     case RFUI_MSG_DRAW:
                         // Update widget render_data and queue old data for drop
                         if (msg->widget) {
-                            // For text widgets, store pre-formatted string in ui_state
-                            if (msg->widget->type == RFUI_WIDGET_TEXT && msg->text) {
-                                if (msg->widget->ui_state) {
-                                    free(msg->widget->ui_state);
-                                }
-                                msg->widget->ui_state = msg->text;
-                                msg->text = nullptr;
-                            }
+                            // Swap overlay front/back buffers so UI reads newly built overlays
+                            msg->widget->overlay_front = 1 - msg->widget->overlay_front;
+
                             obj_p old_data = rfui_registry_update_data(msg->widget, msg->data);
                             // Queue old data for drop in Rayforce thread (if not NULL)
                             if (old_data) {
@@ -310,12 +306,34 @@ i32_t rfui_ui_run(nil_t) {
                             }
                         }
                         break;
-                    case RFUI_MSG_RESULT:
-                        // Display result in REPL
-                        if (msg->text) {
-                            rfui_repl_add_result_text(msg->text);
+                    case RFUI_MSG_ALERT:
+                        // Toast notification — data is obj_p (TYPE_C8)
+                        if (msg->data) {
+                            rfui_toast_push_obj(msg->data);
+                            // Queue obj_p for drop on Rayforce thread
+                            rfui_ui_msg_t* drop_msg = (rfui_ui_msg_t*)malloc(sizeof(rfui_ui_msg_t));
+                            if (drop_msg) {
+                                drop_msg->type = RFUI_MSG_DROP;
+                                drop_msg->obj = msg->data;
+                                drop_msg->widget = nullptr;
+                                drop_msg->expr = nullptr;
+                                if (!rfui_queue_push(g_ctx->ui_to_ray, drop_msg)) {
+                                    (void)msg->data;
+                                    free(drop_msg);
+                                } else {
+                                    poll_waker_p waker = rfui_ctx_get_waker(g_ctx);
+                                    if (waker) poll_waker_wake(waker);
+                                }
+                            }
+                            msg->data = nullptr; // prevent double-drop
                         }
-                        // Queue data for drop if present
+                        break;
+                    case RFUI_MSG_RESULT:
+                        // Display result in REPL — text is in msg->data (obj_p TYPE_C8)
+                        if (msg->data) {
+                            rfui_repl_add_result_obj(msg->data);
+                        }
+                        // Queue data for drop
                         if (msg->data) {
                             rfui_ui_msg_t* drop_msg = (rfui_ui_msg_t*)malloc(sizeof(rfui_ui_msg_t));
                             if (drop_msg) {
@@ -340,9 +358,6 @@ i32_t rfui_ui_run(nil_t) {
                         break;
                 }
 
-                if (msg->text) {
-                    free(msg->text);
-                }
                 free(msg);
                 messages_processed++;
             }
@@ -512,6 +527,9 @@ i32_t rfui_ui_run(nil_t) {
         // Render all widgets (each opens its own ImGui window / viewport)
         rfui_registry_render();
 
+        // Toast overlay (rendered on top of widgets)
+        rfui_toast_render();
+
         // Render
         ImGui::Render();
 
@@ -550,6 +568,9 @@ nil_t rfui_ui_destroy(nil_t) {
 
     // Destroy logo texture
     rfui_logo_destroy();
+
+    // Destroy toast system
+    rfui_toast_destroy();
 
     // Destroy widget registry (frees all widgets)
     rfui_registry_destroy();

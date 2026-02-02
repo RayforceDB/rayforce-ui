@@ -9,6 +9,8 @@
 #include "../deps/rayforce/core/util.h"
 #include "../deps/rayforce/core/dynlib.h"  // For ext_t (external object structure)
 #include "../deps/rayforce/core/io.h"      // For ray_load (script execution)
+#include "../deps/rayforce/core/lambda.h"  // For lambda_call
+#include "../deps/rayforce/core/eval.h"    // For vm_stack_push/peek
 #include "../include/rfui/context.h"
 #include "../include/rfui/message.h"
 #include "../include/rfui/queue.h"
@@ -19,8 +21,9 @@
 // Thread-local context for rayforce-ui functions
 static __thread rfui_ctx_t* g_ctx = NULL;
 
-// Forward declaration
+// Forward declarations
 static void on_ui_message(raw_p data);
+static void evaluate_rules(rfui_widget_t* w, obj_p final_data);
 
 // Process a single UI message
 static void process_ui_message(rfui_ctx_t* ctx, rfui_ui_msg_t* msg) {
@@ -29,43 +32,33 @@ static void process_ui_message(rfui_ctx_t* ctx, rfui_ui_msg_t* msg) {
     switch (msg->type) {
         case RFUI_MSG_EVAL:
             if (msg->expr) {
-                // Evaluate expression
                 obj_p result = eval_str(msg->expr);
 
-                // Format result for display
-                char* result_text = NULL;
+                // Format result as obj_p string — pass directly to UI
+                obj_p fmt = NULL;
                 if (result) {
-                    obj_p fmt = obj_fmt(result, B8_TRUE);
-                    if (fmt && fmt->type == TYPE_C8) {
-                        // Copy formatted string
-                        result_text = (char*)malloc(fmt->len + 1);
-                        if (result_text) {
-                            memcpy(result_text, AS_C8(fmt), fmt->len);
-                            result_text[fmt->len] = '\0';
-                        }
-                        drop_obj(fmt);
-                    }
+                    fmt = obj_fmt(result, B8_TRUE);
                     drop_obj(result);
                 }
 
-                // Send result back to UI
-                if (result_text) {
+                if (fmt && fmt->type == TYPE_C8) {
                     rfui_ray_msg_t* reply = (rfui_ray_msg_t*)malloc(sizeof(rfui_ray_msg_t));
                     if (reply) {
                         reply->type = RFUI_MSG_RESULT;
                         reply->widget = NULL;
-                        reply->data = NULL;
-                        reply->text = result_text;
+                        reply->data = fmt;
 
                         if (rfui_queue_push(ctx->ray_to_ui, reply)) {
-                            glfwPostEmptyEvent();  // Wake UI thread
+                            glfwPostEmptyEvent();
                         } else {
-                            free(result_text);
+                            drop_obj(fmt);
                             free(reply);
                         }
                     } else {
-                        free(result_text);
+                        drop_obj(fmt);
                     }
+                } else {
+                    if (fmt) drop_obj(fmt);
                 }
 
                 free(msg->expr);
@@ -159,6 +152,9 @@ static b8_t widget_type_from_symbol(i64_t sym_id, rfui_widget_type_t* out_type) 
     } else if (strcmp(type_str, "text") == 0) {
         *out_type = RFUI_WIDGET_TEXT;
         return B8_TRUE;
+    } else if (strcmp(type_str, "alert") == 0) {
+        *out_type = RFUI_WIDGET_ALERT;
+        return B8_TRUE;
     }
     return B8_FALSE;
 }
@@ -208,23 +204,19 @@ static obj_p fn_widget(obj_p* x, i64_t n) {
     if (!widget_type_from_symbol(type_val->i64, &wtype)) {
         drop_obj(type_val);
         drop_obj(name_val);
-        return ray_err("widget: unknown type (expected 'grid, 'chart, or 'text)");
+        return ray_err("widget: unknown type (expected 'grid, 'chart, 'text, or 'alert)");
     }
     drop_obj(type_val);
 
-    // Get the name string (null-terminated)
-    char* name_str = malloc(name_val->len + 1);
-    if (!name_str) {
-        drop_obj(name_val);
-        return ray_err("widget: memory allocation failed");
-    }
-    memcpy(name_str, AS_C8(name_val), name_val->len);
-    name_str[name_val->len] = '\0';
+    // Get the name string (null-terminated, stack buffer)
+    char name_buf[128];
+    i64_t nlen = name_val->len < (i64_t)sizeof(name_buf) - 1 ? name_val->len : (i64_t)sizeof(name_buf) - 1;
+    memcpy(name_buf, AS_C8(name_val), nlen);
+    name_buf[nlen] = '\0';
     drop_obj(name_val);
 
     // Create widget
-    rfui_widget_t* w = rfui_widget_create(wtype, name_str);
-    free(name_str);
+    rfui_widget_t* w = rfui_widget_create(wtype, name_buf);
 
     if (!w) {
         return ray_err("widget: failed to create widget");
@@ -239,7 +231,6 @@ static obj_p fn_widget(obj_p* x, i64_t n) {
     msg->type = RFUI_MSG_WIDGET_CREATED;
     msg->widget = w;
     msg->data = NULL;
-    msg->text = NULL;
 
     rfui_queue_push(g_ctx->ray_to_ui, msg);
     glfwPostEmptyEvent();  // Wake UI thread
@@ -331,6 +322,9 @@ static obj_p fn_draw(obj_p* x, i64_t n) {
         }
     }
 
+    // Evaluate rules against final_data (produces overlays on widget)
+    evaluate_rules(w, final_data);
+
     // Send DRAW message to UI
     rfui_ray_msg_t* msg = malloc(sizeof(rfui_ray_msg_t));
     if (!msg) {
@@ -339,22 +333,12 @@ static obj_p fn_draw(obj_p* x, i64_t n) {
     }
     msg->type = RFUI_MSG_DRAW;
     msg->widget = w;
-    msg->text = NULL;
 
-    // For text widgets, pre-format on Rayforce thread (UI thread has no runtime)
-    if (w->type == RFUI_WIDGET_TEXT) {
+    // For text/alert widgets, pre-format on Rayforce thread
+    if (w->type == RFUI_WIDGET_TEXT || w->type == RFUI_WIDGET_ALERT) {
         obj_p fmt = obj_fmt(final_data, B8_TRUE);
-        if (fmt && fmt->type == TYPE_C8) {
-            msg->text = (char*)malloc(fmt->len + 1);
-            if (msg->text) {
-                memcpy(msg->text, AS_C8(fmt), fmt->len);
-                msg->text[fmt->len] = '\0';
-            }
-            drop_obj(fmt);
-        }
-        // Drop the obj_p data here since text widget uses pre-formatted string
         drop_obj(final_data);
-        msg->data = NULL;
+        msg->data = fmt;  // obj_p string, UI reads directly then drops
     } else {
         msg->data = final_data;
     }
@@ -364,6 +348,228 @@ static obj_p fn_draw(obj_p* x, i64_t n) {
 
     // Return widget for chaining
     return clone_obj(widget_obj);
+}
+
+// fn_alert: (alert "message text")
+// Sends a toast notification to the UI — no widget needed
+static obj_p fn_alert(obj_p* x, i64_t n) {
+    if (n != 1) {
+        return ray_err("alert: expects 1 argument (string)");
+    }
+    if (!g_ctx) {
+        return ray_err("alert: no rayforce-ui context available");
+    }
+
+    obj_p val = x[0];
+    if (!val) return atom(-TYPE_NULL);
+
+    // Get or format as obj_p string — stays on rayforce heap
+    obj_p text_obj = NULL;
+    if (IS_ERR(val)) {
+        text_obj = obj_fmt(val, B8_FALSE);
+    } else if (val->type == TYPE_C8) {
+        text_obj = clone_obj(val);
+    } else {
+        text_obj = obj_fmt(val, B8_TRUE);
+    }
+    if (!text_obj || text_obj->type != TYPE_C8) {
+        if (text_obj) drop_obj(text_obj);
+        return atom(-TYPE_NULL);
+    }
+
+    rfui_ray_msg_t* msg = malloc(sizeof(rfui_ray_msg_t));
+    if (!msg) {
+        drop_obj(text_obj);
+        return atom(-TYPE_NULL);
+    }
+    msg->type = RFUI_MSG_ALERT;
+    msg->widget = NULL;
+    msg->data = text_obj;  // obj_p passed to UI, returned for drop
+
+    rfui_queue_push(g_ctx->ray_to_ui, msg);
+    glfwPostEmptyEvent();
+
+    return atom(-TYPE_NULL);
+}
+
+// fn_rule: (rule widget {expr: "(> price 150)" color: 0xFF5149})
+// Registers a comparison-based trigger on widget data
+static obj_p fn_rule(obj_p* x, i64_t n) {
+    if (n != 2) {
+        return ray_err("rule: expects 2 arguments (widget, config dict)");
+    }
+
+    obj_p widget_obj = x[0];
+    obj_p config = x[1];
+
+    if (widget_obj->type != TYPE_EXT) {
+        return ray_err("rule: first argument must be a widget");
+    }
+    if (config->type != TYPE_DICT) {
+        return ray_err("rule: second argument must be a dict");
+    }
+
+    ext_p ext = (ext_p)AS_C8(widget_obj);
+    rfui_widget_t* w = (rfui_widget_t*)ext->ptr;
+    if (!w) {
+        return ray_err("rule: widget is null");
+    }
+    if (w->num_rules >= MAX_RULES) {
+        return ray_err("rule: maximum rules reached");
+    }
+
+    // Extract expr (required)
+    obj_p expr_val = at_sym(config, "expr", 4);
+    if (!expr_val || expr_val->type != TYPE_C8) {
+        if (expr_val) drop_obj(expr_val);
+        return ray_err("rule: missing or invalid 'expr (expected string)");
+    }
+
+    rfui_rule_t* rule = &w->rules[w->num_rules];
+
+    // Copy expr string
+    i64_t len = expr_val->len;
+    if (len >= (i64_t)sizeof(rule->expr)) len = sizeof(rule->expr) - 1;
+    memcpy(rule->expr, AS_C8(expr_val), len);
+    rule->expr[len] = '\0';
+    drop_obj(expr_val);
+
+    // Extract color (optional, default 0)
+    rule->color = 0;
+    obj_p color_val = at_sym(config, "color", 5);
+    if (color_val) {
+        if (color_val->type == TYPE_I64) {
+            rule->color = (u32_t)AS_I64(color_val)[0];
+        } else if (color_val->type == -TYPE_I64) {
+            rule->color = (u32_t)color_val->i64;
+        }
+        drop_obj(color_val);
+    }
+
+    // Extract fn (optional) — store as parsed (unevaluated) lambda
+    rule->fn = NULL;
+    // Extract fn callback lambda from config dict
+    // "fn" is a Rayfall keyword, so at_sym may not find it — iterate dict keys
+    obj_p fn_val = NULL;
+    {
+        obj_p dk = AS_LIST(config)[0];  // dict keys (symbol vector)
+        obj_p dv = AS_LIST(config)[1];  // dict values (list)
+        for (i64_t i = 0; i < dk->len; i++) {
+            const char* kname = str_from_symbol(AS_SYMBOL(dk)[i]);
+            if (kname && strcmp(kname, "fn") == 0) {
+                fn_val = clone_obj(AS_LIST(dv)[i]);
+                break;
+            }
+        }
+    }
+    if (fn_val) {
+        rule->fn = fn_val;
+    }
+
+    w->num_rules++;
+    return clone_obj(widget_obj);
+}
+
+// Evaluate all rules against final_data, populating widget overlays.
+// Called on Rayforce thread during fn_draw.
+static void evaluate_rules(rfui_widget_t* w, obj_p final_data) {
+    if (!w) return;
+
+    // Write to back buffer (opposite of what UI reads)
+    int back = 1 - w->overlay_front;
+
+    // Drop previous back-buffer masks
+    for (int i = 0; i < w->num_overlays[back]; i++) {
+        if (w->overlays[back][i].mask) drop_obj(w->overlays[back][i].mask);
+    }
+    w->num_overlays[back] = 0;
+
+    if (w->num_rules == 0) return;
+    if (!final_data || final_data->type != TYPE_TABLE) return;
+
+    // Get table columns for building lambda args
+    obj_p keys = AS_LIST(final_data)[0];   // symbol vector
+    obj_p vals = AS_LIST(final_data)[1];   // list of column vectors
+    if (!keys || !vals) return;
+    i64_t ncols = keys->len;
+
+    for (int ri = 0; ri < w->num_rules; ri++) {
+        rfui_rule_t* rule = &w->rules[ri];
+        if (!rule->expr[0]) continue;
+
+        // Build single-arg lambda with let statements that extract columns:
+        // "(fn [_d] (let col1 (at _d 'col1)) (let col2 (at _d 'col2)) ... expr)"
+        // Rayfall let: (let name value) — statement in function body
+        // Rayfall at:  (at table 'col) — column accessor
+        char lambda_buf[2048];
+        int pos = 0;
+        pos += snprintf(lambda_buf + pos, sizeof(lambda_buf) - pos, "(fn [_d] ");
+        for (i64_t c = 0; c < ncols; c++) {
+            const char* name = str_from_symbol(AS_SYMBOL(keys)[c]);
+            if (!name) continue;
+            pos += snprintf(lambda_buf + pos, sizeof(lambda_buf) - pos,
+                            "(let %s (at _d '%s)) ", name, name);
+            if (pos >= (int)sizeof(lambda_buf) - 300) break;
+        }
+        pos += snprintf(lambda_buf + pos, sizeof(lambda_buf) - pos, "%s)", rule->expr);
+
+        // Parse the lambda
+        obj_p lambda = parse_str(lambda_buf);
+        if (!lambda || IS_ERR(lambda)) {
+            if (lambda) drop_obj(lambda);
+            continue;
+        }
+
+        // Call: (lambda final_data) using vn_list — same as post_query
+        obj_p data_clone = clone_obj(final_data);
+        if (!data_clone) { drop_obj(lambda); continue; }
+        obj_p call = vn_list(2, lambda, data_clone);
+        if (!call) { drop_obj(lambda); drop_obj(data_clone); continue; }
+
+        obj_p result = eval_obj(call);
+        if (!result || IS_ERR(result)) {
+            if (result) drop_obj(result);
+            continue;
+        }
+
+        // Result should be a boolean vector
+        if (result->type == TYPE_B8) {
+            if (rule->color && w->num_overlays[back] < MAX_RULES) {
+                rfui_color_overlay_t* ov = &w->overlays[back][w->num_overlays[back]++];
+                ov->col_idx = -1;  // whole row
+                ov->mask = result; // take ownership
+                ov->color = rule->color;
+            } else if (rule->fn) {
+                // Find which column the rule expression references
+                obj_p col_vec = NULL;
+                obj_p col_vecs = AS_LIST(final_data)[1];
+                for (i64_t c = 0; c < ncols; c++) {
+                    const char* name = str_from_symbol(AS_SYMBOL(keys)[c]);
+                    if (name && strstr(rule->expr, name)) {
+                        col_vec = AS_LIST(col_vecs)[c];
+                        break;
+                    }
+                }
+                if (!col_vec) { drop_obj(result); continue; }
+
+                // Call lambda with cell value for each matching row
+                b8_t* mask_data = AS_B8(result);
+                for (i64_t row = 0; row < result->len; row++) {
+                    if (!mask_data[row]) continue;
+                    obj_p cell = at_idx(col_vec, row);
+                    if (!cell) continue;
+                    vm_stack_push(cell);
+                    obj_p r = lambda_call(rule->fn, vm_stack_peek(0), 1);
+                    if (r && !IS_ERR(r)) drop_obj(r);
+                }
+                drop_obj(result);
+            } else {
+                drop_obj(result);
+            }
+        } else {
+            drop_obj(result);
+        }
+    }
 }
 
 // Macro to register a function into the runtime's function dict
@@ -390,6 +596,12 @@ static void register_rfui_functions(void) {
 
     // Register draw function: (draw widget data) -> widget
     RFUI_REGISTER_FN(functions, "draw", TYPE_VARY, FN_NONE, fn_draw);
+
+    // Register rule function: (rule widget {expr: "..." color: 0xFF}) -> widget
+    RFUI_REGISTER_FN(functions, "rule", TYPE_VARY, FN_NONE, fn_rule);
+
+    // Register alert function: (alert "message") -> null
+    RFUI_REGISTER_FN(functions, "alert", TYPE_VARY, FN_NONE, fn_alert);
 }
 
 void* rfui_rayforce_thread(void* arg) {

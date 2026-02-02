@@ -23,20 +23,9 @@ extern "C" {
 extern rfui_ctx_t* g_ctx;
 }
 
-#define MAX_COLOR_RULES 8
-
-typedef struct color_rule_t {
-    char column[64];     // Column name to match
-    char value[64];      // Value to match (string comparison)
-    ImVec4 color;        // Text color when matched
-    bool enabled;
-} color_rule_t;
-
 // UI state for grid selection (stored in widget->ui_state)
 typedef struct grid_ui_state_t {
     int selected_row;  // -1 = no selection
-    color_rule_t color_rules[MAX_COLOR_RULES];
-    int num_rules;
     bool settings_open;
 } grid_ui_state_t;
 
@@ -206,27 +195,6 @@ static void render_cell(obj_p col, i64_t row) {
     }
 }
 
-// Get cell value as string for color rule matching
-static void cell_to_string(obj_p col, i64_t row, char* buf, size_t buf_sz) {
-    buf[0] = '\0';
-    if (!col || row < 0 || row >= col->len) return;
-
-    switch (col->type) {
-        case TYPE_I64:     snprintf(buf, buf_sz, "%lld", (long long)AS_I64(col)[row]); break;
-        case TYPE_I32:     snprintf(buf, buf_sz, "%d", AS_I32(col)[row]); break;
-        case TYPE_I16:     snprintf(buf, buf_sz, "%d", (int)AS_I16(col)[row]); break;
-        case TYPE_F64:     snprintf(buf, buf_sz, "%.6g", AS_F64(col)[row]); break;
-        case TYPE_SYMBOL: {
-            i64_t sid = AS_SYMBOL(col)[row];
-            const char* s = str_from_symbol(sid);
-            if (s) snprintf(buf, buf_sz, "%s", s);
-            break;
-        }
-        case TYPE_B8:      snprintf(buf, buf_sz, "%s", AS_B8(col)[row] ? "true" : "false"); break;
-        default: break;
-    }
-}
-
 extern "C" {
 
 // Note: render_data lifetime is managed by the widget registry and must remain
@@ -316,11 +284,14 @@ nil_t rfui_render_grid(rfui_widget_t* widget) {
         ui_state = (grid_ui_state_t*)malloc(sizeof(grid_ui_state_t));
         if (ui_state) {
             ui_state->selected_row = -1;
-            ui_state->num_rules = 0;
             ui_state->settings_open = false;
             widget->ui_state = ui_state;
         }
     }
+
+    // Snapshot overlay front buffer for this frame
+    int ov_front = widget->overlay_front;
+    int ov_count = widget->num_overlays[ov_front];
 
     // Display table info with secondary text color
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.545f, 0.580f, 0.620f, 1.0f));
@@ -346,58 +317,59 @@ nil_t rfui_render_grid(rfui_widget_t* widget) {
         }
 
         if (ImGui::BeginPopup("GridSettings")) {
-            ImGui::Text(ICON_PALETTE " Color Rules");
+            ImGui::Text(ICON_PALETTE " Color Rules (%d/%d)", widget->num_rules, MAX_RULES);
             ImGui::Separator();
 
-            for (int i = 0; i < ui_state->num_rules; i++) {
-                color_rule_t* r = &ui_state->color_rules[i];
+            for (int i = 0; i < widget->num_rules; i++) {
+                rfui_rule_t* r = &widget->rules[i];
                 ImGui::PushID(i);
 
-                // Column combo
-                ImGui::SetNextItemWidth(100);
-                if (ImGui::BeginCombo("##col", r->column[0] ? r->column : "<column>")) {
-                    for (i64_t c = 0; c < ncols; c++) {
-                        const char* name = str_from_symbol(AS_SYMBOL(keys)[c]);
-                        if (name && ImGui::Selectable(name, strcmp(r->column, name) == 0)) {
-                            snprintf(r->column, sizeof(r->column), "%s", name);
-                        }
-                    }
-                    ImGui::EndCombo();
+                // Expression input
+                ImGui::SetNextItemWidth(200);
+                ImGui::InputText("##expr", r->expr, sizeof(r->expr));
+
+                // Color picker (unpack/repack RGBA)
+                ImGui::SameLine();
+                float col[3] = {
+                    ((r->color >> 16) & 0xFF) / 255.0f,
+                    ((r->color >> 8) & 0xFF) / 255.0f,
+                    (r->color & 0xFF) / 255.0f
+                };
+                if (ImGui::ColorEdit3("##clr", col,
+                        ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel)) {
+                    r->color = ((u32_t)(col[0] * 255) << 16) |
+                               ((u32_t)(col[1] * 255) << 8) |
+                               (u32_t)(col[2] * 255);
                 }
 
-                ImGui::SameLine();
-                ImGui::SetNextItemWidth(80);
-                ImGui::InputText("##val", r->value, sizeof(r->value));
-
-                ImGui::SameLine();
-                ImGui::ColorEdit3("##clr", (float*)&r->color,
-                    ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
-
-                ImGui::SameLine();
-                ImGui::Checkbox("##en", &r->enabled);
-
+                // Delete button
                 ImGui::SameLine();
                 if (ImGui::SmallButton(ICON_XMARK)) {
-                    // Remove rule by shifting
-                    for (int j = i; j < ui_state->num_rules - 1; j++)
-                        ui_state->color_rules[j] = ui_state->color_rules[j + 1];
-                    ui_state->num_rules--;
+                    // fn is owned by rayforce thread — mark for cleanup, don't drop here
+                    // Shift remaining rules down (fn pointer moves with the struct)
+                    for (int j = i; j < widget->num_rules - 1; j++)
+                        widget->rules[j] = widget->rules[j + 1];
+                    // Clear the last slot
+                    widget->rules[widget->num_rules - 1].fn = nullptr;
+                    widget->rules[widget->num_rules - 1].expr[0] = '\0';
+                    widget->num_rules--;
                     i--;
                 }
 
                 ImGui::PopID();
             }
 
-            if (ui_state->num_rules < MAX_COLOR_RULES) {
+            if (widget->num_rules < MAX_RULES) {
                 if (ImGui::Button(ICON_PLUS " Add Rule")) {
-                    color_rule_t* r = &ui_state->color_rules[ui_state->num_rules++];
-                    r->column[0] = '\0';
-                    r->value[0] = '\0';
-                    r->color = ImVec4(0.0f, 1.0f, 0.0f, 1.0f);
-                    r->enabled = true;
+                    rfui_rule_t* r = &widget->rules[widget->num_rules++];
+                    r->expr[0] = '\0';
+                    r->fn = nullptr;
+                    r->color = 0xFF5149;  // default red
                 }
             }
 
+            ImGui::Separator();
+            ImGui::TextDisabled("Active overlays: %d", ov_count);
             ImGui::EndPopup();
         }
     }
@@ -483,23 +455,6 @@ nil_t rfui_render_grid(rfui_widget_t* widget) {
         // Cache column pointers for performance (avoid repeated AS_LIST dereference)
         obj_p* cols = AS_LIST(vals);
 
-        // Pre-resolve color rule column indices
-        int rule_col_idx[MAX_COLOR_RULES];
-        if (ui_state) {
-            for (int ri = 0; ri < ui_state->num_rules; ri++) {
-                rule_col_idx[ri] = -1;
-                if (!ui_state->color_rules[ri].enabled || !ui_state->color_rules[ri].column[0])
-                    continue;
-                for (i64_t c = 0; c < ncols; c++) {
-                    const char* name = str_from_symbol(AS_SYMBOL(keys)[c]);
-                    if (name && strcmp(name, ui_state->color_rules[ri].column) == 0) {
-                        rule_col_idx[ri] = (int)c;
-                        break;
-                    }
-                }
-            }
-        }
-
         while (clipper.Step()) {
             for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; row++) {
                 ImGui::TableNextRow();
@@ -553,16 +508,18 @@ nil_t rfui_render_grid(rfui_widget_t* widget) {
                         ImGui::SameLine();
                     }
 
-                    // Check color rules for this cell
+                    // Check overlay rules for this row
                     bool cell_colored = false;
-                    if (ui_state) {
-                        for (int ri = 0; ri < ui_state->num_rules; ri++) {
-                            color_rule_t* r = &ui_state->color_rules[ri];
-                            if (!r->enabled || rule_col_idx[ri] != (int)col_idx) continue;
-                            char cell_buf[128];
-                            cell_to_string(col, (i64_t)row, cell_buf, sizeof(cell_buf));
-                            if (strcmp(cell_buf, r->value) == 0) {
-                                ImGui::PushStyleColor(ImGuiCol_Text, r->color);
+                    for (int oi = 0; oi < ov_count; oi++) {
+                        rfui_color_overlay_t* ov = &widget->overlays[ov_front][oi];
+                        if (ov->mask && row < ov->mask->len) {
+                            if (AS_B8(ov->mask)[row]) {
+                                u32_t c = ov->color;
+                                // Unpack RGBA: color stored as 0xRRGGBB
+                                float r = ((c >> 16) & 0xFF) / 255.0f;
+                                float g = ((c >> 8) & 0xFF) / 255.0f;
+                                float b = (c & 0xFF) / 255.0f;
+                                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(r, g, b, 1.0f));
                                 cell_colored = true;
                                 break;
                             }

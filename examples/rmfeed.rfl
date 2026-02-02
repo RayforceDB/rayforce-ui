@@ -1,11 +1,17 @@
-(set .kx.listen (loadfn "/tmp/libraykx.so" "raykx_listen" 1))
 (set .kx.hopen (loadfn "/tmp/libraykx.so" "raykx_hopen" 1))
 (set .kx.hclose (loadfn "/tmp/libraykx.so" "raykx_hclose" 1))
 (set .kx.send (loadfn "/tmp/libraykx.so" "raykx_send" 2))
 
+(set upd (fn [payload]
 
+    (println "Received payload: %" payload)
+))
 
-(set h (.kx.hopen "localhost:5001"))
+;; Connect to the server
+(set h (.kx.hopen "localhost:60325"))
 
-(set ts (widget {type: 'text name: "Trades Count"}))
-(draw ts (.kx.send h "1+5612312"))
+;; subscribe and get initial data
+(set ini (.kx.send h '.net.sub))
+
+;; (set ts (widget {type: 'text name: "Trades Count"}))
+;; (draw ts (.kx.send h "1+5612312"))

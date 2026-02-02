@@ -28,6 +28,7 @@
 #define ICON_CHECK       "\xef\x80\x8c"  // f00c - enabled/checkbox
 #define ICON_EYE         "\xef\x81\xae"  // f06e - visible/enabled
 #define ICON_FILTER      "\xef\x82\xb0"  // f0b0 - filter
+#define ICON_BELL        "\xef\x83\xb3"  // f0f3 - fa-bell
 
 // Window controls (custom title bar)
 #define ICON_MINIMIZE    "\xef\x8b\x91"  // f2d1 - fa-window-minimize

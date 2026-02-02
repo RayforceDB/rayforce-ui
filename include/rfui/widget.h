@@ -4,10 +4,25 @@
 
 #include "../../deps/rayforce/core/rayforce.h"
 
+#define MAX_RULES 16
+
+typedef struct rfui_rule_t {
+    char expr[256];      // Rayfall expression: "(> Price 31.50)"
+    obj_p fn;            // callback lambda or NULL (refcounted)
+    u32_t color;         // packed RGBA, 0 = no color action
+} rfui_rule_t;
+
+typedef struct rfui_color_overlay_t {
+    i64_t col_idx;       // column index in table (-1 = whole row)
+    obj_p mask;          // boolean vector (refcounted)
+    u32_t color;         // packed RGBA
+} rfui_color_overlay_t;
+
 typedef enum rfui_widget_type_t {
     RFUI_WIDGET_GRID,
     RFUI_WIDGET_CHART,
-    RFUI_WIDGET_TEXT
+    RFUI_WIDGET_TEXT,
+    RFUI_WIDGET_ALERT
 } rfui_widget_type_t;
 
 typedef struct rfui_widget_t {
@@ -22,6 +37,16 @@ typedef struct rfui_widget_t {
     u32_t dock_id;
     raw_p ui_state;       // Type-specific UI state
     obj_p render_data;    // Current data for rendering
+
+    // Rules (Rayforce thread writes, UI thread reads overlays after draw msg)
+    rfui_rule_t rules[MAX_RULES];
+    int num_rules;
+
+    // Double-buffered overlays: rayforce builds into back, UI reads from front.
+    // Swapped on UI thread when processing RFUI_MSG_DRAW.
+    rfui_color_overlay_t overlays[2][MAX_RULES];
+    int num_overlays[2];
+    int overlay_front;  // 0 or 1 — index UI reads from
 } rfui_widget_t;
 
 // Create widget struct (called from Rayforce thread)

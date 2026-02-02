@@ -160,7 +160,7 @@ SRC_C = src/main.c src/queue.c src/widget.c src/context.c src/rayforce_thread.c
 OBJ_C = $(SRC_C:.c=.o)
 
 # C++ source files (rayforce-ui)
-SRC_CXX = src/ui.cpp src/widget_registry.cpp src/grid_renderer.cpp src/chart_renderer.cpp src/text_renderer.cpp src/repl_renderer.cpp src/syntax.cpp src/theme.cpp src/logo.cpp
+SRC_CXX = src/ui.cpp src/widget_registry.cpp src/grid_renderer.cpp src/chart_renderer.cpp src/text_renderer.cpp src/toast.cpp src/repl_renderer.cpp src/syntax.cpp src/theme.cpp src/logo.cpp
 OBJ_CXX = $(SRC_CXX:.cpp=.o)
 
 ifeq (,$(IS_WINDOWS))

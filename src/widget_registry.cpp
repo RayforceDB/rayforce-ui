@@ -20,6 +20,7 @@ extern "C" {
 #include "../include/rfui/text_renderer.h"
 }
 
+
 // Global widget storage
 static std::vector<rfui_widget_t*> g_widgets;
 
@@ -43,11 +44,10 @@ nil_t rfui_registry_destroy(nil_t) {
             // Free type-specific ui_state (must use delete for C++ objects)
             switch (widget->type) {
                 case RFUI_WIDGET_TEXT:
-                    // Text widget ui_state is a malloc'd char* (pre-formatted text)
-                    if (widget->ui_state) {
-                        free(widget->ui_state);
-                        widget->ui_state = nullptr;
-                    }
+                    // Text widget reads from render_data (obj_p), no ui_state
+                    break;
+                case RFUI_WIDGET_ALERT:
+                    // Toasts are global, no per-widget state
                     break;
                 default:
                     // Other widget types use plain malloc/free for ui_state
@@ -61,6 +61,14 @@ nil_t rfui_registry_destroy(nil_t) {
             widget->post_query = nullptr;
             widget->on_select = nullptr;
             widget->render_data = nullptr;
+            for (int i = 0; i < widget->num_rules; i++) {
+                widget->rules[i].fn = nullptr;
+            }
+            for (int b = 0; b < 2; b++) {
+                for (int i = 0; i < widget->num_overlays[b]; i++) {
+                    widget->overlays[b][i].mask = nullptr;
+                }
+            }
         }
         rfui_widget_destroy(widget);
     }
@@ -81,9 +89,10 @@ static void render_widget(rfui_widget_t* widget) {
     }
 
         // Set minimum size constraints for usability
-        ImGui::SetNextWindowSizeConstraints(ImVec2(400, 300), ImVec2(FLT_MAX, FLT_MAX));
+        // Alert widgets use toast system — skip panel rendering
+        if (widget->type == RFUI_WIDGET_ALERT) return;
 
-        // Set initial size on first appearance (only applies once)
+        ImGui::SetNextWindowSizeConstraints(ImVec2(400, 300), ImVec2(FLT_MAX, FLT_MAX));
         ImGui::SetNextWindowSize(ImVec2(600, 400), ImGuiCond_FirstUseEver);
 
         // Build icon-prefixed window label
@@ -93,6 +102,7 @@ static void render_widget(rfui_widget_t* widget) {
             case RFUI_WIDGET_GRID:  icon = ICON_TABLE " ";      break;
             case RFUI_WIDGET_CHART: icon = ICON_CHART_LINE " "; break;
             case RFUI_WIDGET_TEXT:  icon = ICON_FILE_LINES " "; break;
+            case RFUI_WIDGET_ALERT: break; // handled by toast system
             default: break;
         }
         snprintf(window_label, sizeof(window_label), "%s%s", icon, widget->name);
@@ -111,6 +121,8 @@ static void render_widget(rfui_widget_t* widget) {
             case RFUI_WIDGET_TEXT:
                 rfui_render_text(widget);
                 break;
+            case RFUI_WIDGET_ALERT:
+                break; // handled by toast system
             default:
                 ImGui::TextDisabled("Unknown widget type: %d", widget->type);
                 break;
