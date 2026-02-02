@@ -156,15 +156,6 @@ i32_t rfui_ui_init(nil_t) {
     // to screen points — only fonts need the scale for sharp rendering.
     // On Windows/Linux, content scale reflects actual UI scaling (1.25, 1.5, etc.)
     // and both fonts and style need scaling.
-    float xscale, yscale;
-    glfwGetWindowContentScale(g_window, &xscale, &yscale);
-    float dpi_scale = (xscale > yscale) ? xscale : yscale;
-    if (dpi_scale < 1.0f) dpi_scale = 1.0f;
-#ifdef __APPLE__
-    float style_scale = 1.0f;  // macOS handles point-to-pixel transparently
-#else
-    float style_scale = dpi_scale;
-#endif
 
     // Setup Dear ImGui and ImPlot contexts
     IMGUI_CHECKVERSION();
@@ -185,29 +176,27 @@ i32_t rfui_ui_init(nil_t) {
     // Apply dashboard theme (replaces StyleColorsDark)
     rfui_theme_apply();
 
-    // Load primary font (from embedded data)
-    float font_size = 20.0f * dpi_scale;
+    // Load Space Mono + FontAwesome as the single UI font (index 0)
+    float font_size = 32.0f;
     ImFontConfig font_cfg;
     font_cfg.FontDataOwnedByAtlas = false;
-    io.Fonts->AddFontFromMemoryTTF((void*)embed_JetBrainsMono_Regular_ttf, embed_JetBrainsMono_Regular_ttf_len, font_size, &font_cfg);
+    io.Fonts->AddFontFromMemoryTTF((void*)embed_SpaceMono_Bold_ttf, embed_SpaceMono_Bold_ttf_len, font_size, &font_cfg);
 
-    // Merge FontAwesome icons into the primary font
     static const ImWchar icon_ranges[] = { 0xf000, 0xf8ff, 0 };
+    float icon_size = font_size * 0.75f;
     ImFontConfig icon_cfg;
     icon_cfg.MergeMode = true;
     icon_cfg.PixelSnapH = true;
-    icon_cfg.GlyphMinAdvanceX = font_size;
+    icon_cfg.GlyphMinAdvanceX = icon_size;
+    icon_cfg.GlyphOffset.y = 2.0f;
     icon_cfg.FontDataOwnedByAtlas = false;
-    io.Fonts->AddFontFromMemoryTTF((void*)embed_fa_solid_900_otf, embed_fa_solid_900_otf_len, font_size, &icon_cfg, icon_ranges);
+    io.Fonts->AddFontFromMemoryTTF((void*)embed_fa_solid_900_otf, embed_fa_solid_900_otf_len, icon_size, &icon_cfg, icon_ranges);
 
-    // Large font for text/label widgets (index 1)
-    float large_font_size = 48.0f * dpi_scale;
+    // Large Space Mono for text/label widgets (index 1)
+    float large_font_size = 72.0f;
     ImFontConfig large_cfg;
     large_cfg.FontDataOwnedByAtlas = false;
-    io.Fonts->AddFontFromMemoryTTF((void*)embed_JetBrainsMono_Regular_ttf, embed_JetBrainsMono_Regular_ttf_len, large_font_size, &large_cfg);
-
-    // Scale style for HiDPI (but not fonts - they're already sized correctly)
-    ImGui::GetStyle().ScaleAllSizes(style_scale);
+    io.Fonts->AddFontFromMemoryTTF((void*)embed_SpaceMono_Bold_ttf, embed_SpaceMono_Bold_ttf_len, large_font_size, &large_cfg);
 
     // Setup Platform/Renderer backends
     ImGui_ImplGlfw_InitForOpenGL(g_window, true);
@@ -391,33 +380,20 @@ i32_t rfui_ui_run(nil_t) {
                 title_min, title_max,
                 IM_COL32(22, 27, 34, 255));  // COL_SURFACE #161B22
 
-            // App title (left side)
+            // App title (left side) — bolt in default font, text in Orbitron
             ImGui::SetCursorScreenPos(ImVec2(title_min.x + 12.0f,
                                               title_min.y + (title_h - ImGui::GetFontSize()) * 0.5f));
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.8f, 0.2f, 1.0f));
+            ImGui::TextUnformatted("\xe2\x9a\xa1");
+            ImGui::PopStyleColor();
+            ImGui::SameLine(0, 4.0f);
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.545f, 0.580f, 0.620f, 1.0f));
-            ImGui::TextUnformatted("\xe2\x9a\xa1 Rayforce v" RFUI_VERSION);
+            ImGui::TextUnformatted("Rayforce v" RFUI_VERSION);
             ImGui::PopStyleColor();
 
-            // Open script button (right side, before window controls)
+            // Title bar buttons: open | minimize | maximize | close
             float btn_w = title_h * 1.4f;
-            float btn_x = title_max.x - btn_w * 3;
-            float open_btn_x = btn_x - btn_w;
-
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1, 1, 1, 0.1f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(1, 1, 1, 0.2f));
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.545f, 0.580f, 0.620f, 1.0f));
-            ImGui::SetCursorScreenPos(ImVec2(open_btn_x, title_min.y));
-            ImGui::SetWindowFontScale(0.7f);
-            if (ImGui::Button(ICON_FOLDER_OPEN "##open", ImVec2(btn_w, title_h))) {
-                IGFD::FileDialogConfig config;
-                config.path = "examples";
-                ImGuiFileDialog::Instance()->OpenDialog("LoadScript", "Open Script", ".rfl", config);
-            }
-            ImGui::SetWindowFontScale(1.0f);
-            ImGui::PopStyleColor(4);
-
-            // Window control buttons (right side) — simple text buttons
+            float btn_x = title_max.x - btn_w * 4;
             bool maximized = glfwGetWindowAttrib(g_window, GLFW_MAXIMIZED) != 0;
 
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
@@ -426,15 +402,23 @@ i32_t rfui_ui_run(nil_t) {
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.545f, 0.580f, 0.620f, 1.0f));
             ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 0.0f);
 
-            // Minimize
+            // Open script
             ImGui::SetCursorScreenPos(ImVec2(btn_x, title_min.y));
-            if (ImGui::Button("\xe2\x94\x80##min", ImVec2(btn_w, title_h))) {
+            if (ImGui::Button(ICON_FOLDER_OPEN "##open", ImVec2(btn_w, title_h))) {
+                IGFD::FileDialogConfig config;
+                config.path = "examples";
+                ImGuiFileDialog::Instance()->OpenDialog("LoadScript", "Open Script", ".rfl", config);
+            }
+
+            // Minimize
+            ImGui::SetCursorScreenPos(ImVec2(btn_x + btn_w, title_min.y));
+            if (ImGui::Button(ICON_MINIMIZE "##min", ImVec2(btn_w, title_h))) {
                 glfwIconifyWindow(g_window);
             }
 
             // Maximize / Restore
-            ImGui::SetCursorScreenPos(ImVec2(btn_x + btn_w, title_min.y));
-            if (ImGui::Button(maximized ? "\xe2\xa7\x89##max" : "\xe2\x96\xa1##max",
+            ImGui::SetCursorScreenPos(ImVec2(btn_x + btn_w * 2, title_min.y));
+            if (ImGui::Button(maximized ? ICON_RESTORE "##max" : ICON_MAXIMIZE "##max",
                               ImVec2(btn_w, title_h))) {
                 if (maximized) glfwRestoreWindow(g_window);
                 else glfwMaximizeWindow(g_window);
@@ -444,8 +428,8 @@ i32_t rfui_ui_run(nil_t) {
             ImGui::PopStyleColor(2);  // pop ButtonHovered, ButtonActive
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.973f, 0.318f, 0.286f, 0.5f));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.973f, 0.318f, 0.286f, 0.8f));
-            ImGui::SetCursorScreenPos(ImVec2(btn_x + btn_w * 2, title_min.y));
-            if (ImGui::Button("\xc3\x97##close", ImVec2(btn_w, title_h))) {
+            ImGui::SetCursorScreenPos(ImVec2(btn_x + btn_w * 3, title_min.y));
+            if (ImGui::Button(ICON_CLOSE "##close", ImVec2(btn_w, title_h))) {
                 glfwSetWindowShouldClose(g_window, GLFW_TRUE);
             }
             ImGui::PopStyleColor(4);
@@ -453,7 +437,7 @@ i32_t rfui_ui_run(nil_t) {
 
             // Title bar drag-to-move (only in the non-button area)
             ImGui::SetCursorScreenPos(title_min);
-            ImGui::InvisibleButton("##titlebar_drag", ImVec2(open_btn_x - title_min.x, title_h));
+            ImGui::InvisibleButton("##titlebar_drag", ImVec2(btn_x - title_min.x, title_h));
             // Double-click to maximize/restore
             if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0)) {
                 if (maximized) glfwRestoreWindow(g_window);

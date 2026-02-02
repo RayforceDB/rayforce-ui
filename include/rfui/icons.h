@@ -30,9 +30,9 @@
 #define ICON_FILTER      "\xef\x82\xb0"  // f0b0 - filter
 
 // Window controls (custom title bar)
-#define ICON_MINIMIZE    "\xef\x8a\x8d"  // f28d - fa-window-minimize
-#define ICON_MAXIMIZE    "\xef\x8a\x90"  // f290 - fa-window-maximize
-#define ICON_RESTORE     "\xef\x8a\x92"  // f292 - fa-window-restore
+#define ICON_MINIMIZE    "\xef\x8b\x91"  // f2d1 - fa-window-minimize
+#define ICON_MAXIMIZE    "\xef\x8b\x90"  // f2d0 - fa-window-maximize
+#define ICON_RESTORE     "\xef\x8b\x92"  // f2d2 - fa-window-restore
 #define ICON_CLOSE       "\xef\x80\x8d"  // f00d - fa-xmark
 
 #endif // RFUI_ICONS_H
