@@ -61,8 +61,10 @@ nil_t rfui_registry_destroy(nil_t) {
             widget->post_query = nullptr;
             widget->on_select = nullptr;
             widget->render_data = nullptr;
-            for (int i = 0; i < widget->num_rules; i++) {
-                widget->rules[i].fn = nullptr;
+            for (int c = 0; c < MAX_COLS; c++) {
+                for (int i = 0; i < widget->col_rules[c].num_rules; i++) {
+                    widget->col_rules[c].rules[i].fn = nullptr;
+                }
             }
             for (int b = 0; b < 2; b++) {
                 for (int i = 0; i < widget->num_overlays[b]; i++) {

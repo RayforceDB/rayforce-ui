@@ -18,14 +18,8 @@
 ;; Candlestick chart — OHLC bars from last 500 trades, 10 trades per bar
 (set pc (widget {type: 'chart name: "Price Chart"}))
 
-;; Color rules — evaluated each draw, no re-registration needed
-(rule t {expr: "(> Price 800)" color: 16733513})       ;; red: high-price trades
-(rule t {expr: "(< Price 200)" color: 4176208})        ;; green: low-price trades
-(rule t {expr: "(== Sym 'AAPL)" color: 13801762}) ;; yellow: wide spread
-(rule q {expr: "(> (- Ask Bid) 500)" color: 13801762}) ;; yellow: wide spread
-
-;; Callback rule — alert when price exceeds 950
-(rule t {expr: "(> Price 950)" fn: (fn [r] (alert r))})   ;; 'row' is a builtin — use 'r'
+;; Rules are now configured via per-column dropdown menus in the grid UI
+;; Click the chevron (▼) on any column header to add color rules or sort
 
 ;; Single timer drives all widget updates
 ;; Batch query: quotes, trades, counts, and OHLC candles via xbar
