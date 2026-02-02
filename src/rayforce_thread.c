@@ -446,24 +446,43 @@ static void evaluate_rules(rfui_widget_t* w, obj_p final_data) {
         const char* col_name = str_from_symbol(AS_SYMBOL(keys)[c]);
         if (!col_name) continue;
 
+        // Check column type for auto-quoting symbol values
+        obj_p col_data = AS_LIST(vals)[c];
+        i8_t is_symbol_col = (col_data && col_data->type == TYPE_SYMBOL);
+
         for (int ri = 0; ri < cr->num_rules; ri++) {
             rfui_rule_t* rule = &cr->rules[ri];
-            const char* op_str = op_to_str(rule->op);
-            if (!op_str) continue;
             if (!rule->value[0]) continue;
 
-            // Build lambda: "(fn [_d] (let COL (at _d 'COL)) (OP COL VALUE))"
-            // For in/within: "(fn [_d] (let COL (at _d 'COL)) (in COL (list V1 V2 ...)))"
             char lambda_buf[4096];
             int written;
-            if (rule->op == RFUI_OP_IN || rule->op == RFUI_OP_WITHIN) {
+
+            if (rule->op == -1) {
+                // Raw expression rule — wrap user expression as lambda over table
                 written = snprintf(lambda_buf, sizeof(lambda_buf),
-                    "(fn [_d] (let %s (at _d '%s)) (%s %s (list %s)))",
-                    col_name, col_name, op_str, col_name, rule->value);
+                    "(fn [_d] %s)", rule->value);
             } else {
-                written = snprintf(lambda_buf, sizeof(lambda_buf),
-                    "(fn [_d] (let %s (at _d '%s)) (%s %s %s))",
-                    col_name, col_name, op_str, col_name, rule->value);
+                const char* op_str = op_to_str(rule->op);
+                if (!op_str) continue;
+
+                // Auto-quote symbol values if user didn't already
+                char val_buf[512];
+                if (is_symbol_col && rule->value[0] != '\'') {
+                    snprintf(val_buf, sizeof(val_buf), "'%s", rule->value);
+                } else {
+                    snprintf(val_buf, sizeof(val_buf), "%s", rule->value);
+                }
+
+                // Build lambda: "(fn [_d] (let COL (at _d 'COL)) (OP COL VALUE))"
+                if (rule->op == RFUI_OP_IN || rule->op == RFUI_OP_WITHIN) {
+                    written = snprintf(lambda_buf, sizeof(lambda_buf),
+                        "(fn [_d] (let %s (at _d '%s)) (%s %s (list %s)))",
+                        col_name, col_name, op_str, col_name, val_buf);
+                } else {
+                    written = snprintf(lambda_buf, sizeof(lambda_buf),
+                        "(fn [_d] (let %s (at _d '%s)) (%s %s %s))",
+                        col_name, col_name, op_str, col_name, val_buf);
+                }
             }
             if (written >= (int)sizeof(lambda_buf)) continue;  // truncated
 

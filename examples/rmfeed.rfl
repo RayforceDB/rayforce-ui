@@ -2,16 +2,30 @@
 (set .kx.hclose (loadfn "/tmp/libraykx.so" "raykx_hclose" 1))
 (set .kx.send (loadfn "/tmp/libraykx.so" "raykx_send" 2))
 
-(set upd (fn [payload]
+;; Stats grid
+(set stats-grid (widget {type: 'grid name: "Stats"}))
 
-    (println "Received payload: %" payload)
+;; Risk view
+(set risk-view (widget {type: 'grid name: "Risk View"}))
+
+;; Callback to be called by kdb+ server
+(set upd (fn [payload]
+    (let data (at payload 'delta))
+    (upsert 'stats 3 data)
+    (draw stats-grid stats)
+    (draw risk-view
+        (xasc
+            (select {from: stats
+                Entity: EntityID
+                Symbol: Symbol
+                NetPosBPU: (- LPosBPU SPosBPU)
+                OpgQty: (- SSL SSS)
+                Pos: (- OLS OSS)
+            }) ['NetPosBPU]))
 ))
 
 ;; Connect to the server
 (set h (.kx.hopen "localhost:60325"))
 
 ;; subscribe and get initial data
-(set ini (.kx.send h '.net.sub))
-
-;; (set ts (widget {type: 'text name: "Trades Count"}))
-;; (draw ts (.kx.send h "1+5612312"))
+(set stats (.kx.send h (list '.net.sub 0)))
