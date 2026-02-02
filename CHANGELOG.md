@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.1.6 — 2026-02-02
+
+- Switch to Fira Code Bold font (full box-drawing character support)
+- Fix multi-line error rendering in REPL (ANSI newline handling)
+- Export rayforce symbols for plugin loading (-rdynamic)
+- Auto-clone rayforce dependency on make
+- Guard clean target against missing deps
+
 ## v0.1.5 — 2026-02-02
 
 - Professional dark theme with brand gold (#E9A033) accents
