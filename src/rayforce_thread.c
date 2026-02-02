@@ -95,6 +95,19 @@ static void process_ui_message(rfui_ctx_t* ctx, rfui_ui_msg_t* msg) {
             }
             break;
 
+        case RFUI_MSG_SET_COL_RULES:
+            if (msg->widget && msg->col_rules && msg->col_idx >= 0 && msg->col_idx < MAX_COLS) {
+                // Drop old fn refcounts for this column
+                rfui_col_rules_t* old = &msg->widget->col_rules[msg->col_idx];
+                for (int i = 0; i < old->num_rules; i++) {
+                    if (old->rules[i].fn) drop_obj(old->rules[i].fn);
+                }
+                // Copy new rules
+                memcpy(old, msg->col_rules, sizeof(rfui_col_rules_t));
+            }
+            if (msg->col_rules) free(msg->col_rules);
+            break;
+
         case RFUI_MSG_QUIT:
             // Set quit flag
             rfui_ctx_set_quit(ctx, B8_TRUE);
@@ -392,86 +405,21 @@ static obj_p fn_alert(obj_p* x, i64_t n) {
     return atom(-TYPE_NULL);
 }
 
-// fn_rule: (rule widget {expr: "(> price 150)" color: 0xFF5149})
-// Registers a comparison-based trigger on widget data
-static obj_p fn_rule(obj_p* x, i64_t n) {
-    if (n != 2) {
-        return ray_err("rule: expects 2 arguments (widget, config dict)");
+// Map op enum to Rayfall operator string
+static const char* op_to_str(i8_t op) {
+    switch (op) {
+        case RFUI_OP_GT:     return ">";
+        case RFUI_OP_LT:     return "<";
+        case RFUI_OP_GE:     return ">=";
+        case RFUI_OP_LE:     return "<=";
+        case RFUI_OP_EQ:     return "==";
+        case RFUI_OP_NE:     return "!=";
+        case RFUI_OP_IN:     return "in";
+        case RFUI_OP_WITHIN: return "within";
+        default: return NULL;
     }
-
-    obj_p widget_obj = x[0];
-    obj_p config = x[1];
-
-    if (widget_obj->type != TYPE_EXT) {
-        return ray_err("rule: first argument must be a widget");
-    }
-    if (config->type != TYPE_DICT) {
-        return ray_err("rule: second argument must be a dict");
-    }
-
-    ext_p ext = (ext_p)AS_C8(widget_obj);
-    rfui_widget_t* w = (rfui_widget_t*)ext->ptr;
-    if (!w) {
-        return ray_err("rule: widget is null");
-    }
-    if (w->num_rules >= MAX_RULES) {
-        return ray_err("rule: maximum rules reached");
-    }
-
-    // Extract expr (required)
-    obj_p expr_val = at_sym(config, "expr", 4);
-    if (!expr_val || expr_val->type != TYPE_C8) {
-        if (expr_val) drop_obj(expr_val);
-        return ray_err("rule: missing or invalid 'expr (expected string)");
-    }
-
-    rfui_rule_t* rule = &w->rules[w->num_rules];
-
-    // Copy expr string
-    i64_t len = expr_val->len;
-    if (len >= (i64_t)sizeof(rule->expr)) len = sizeof(rule->expr) - 1;
-    memcpy(rule->expr, AS_C8(expr_val), len);
-    rule->expr[len] = '\0';
-    drop_obj(expr_val);
-
-    // Extract color (optional, default 0)
-    rule->color = 0;
-    obj_p color_val = at_sym(config, "color", 5);
-    if (color_val) {
-        if (color_val->type == TYPE_I64) {
-            rule->color = (u32_t)AS_I64(color_val)[0];
-        } else if (color_val->type == -TYPE_I64) {
-            rule->color = (u32_t)color_val->i64;
-        }
-        drop_obj(color_val);
-    }
-
-    // Extract fn (optional) — store as parsed (unevaluated) lambda
-    rule->fn = NULL;
-    // Extract fn callback lambda from config dict
-    // "fn" is a Rayfall keyword, so at_sym may not find it — iterate dict keys
-    obj_p fn_val = NULL;
-    {
-        obj_p dk = AS_LIST(config)[0];  // dict keys (symbol vector)
-        obj_p dv = AS_LIST(config)[1];  // dict values (list)
-        for (i64_t i = 0; i < dk->len; i++) {
-            const char* kname = str_from_symbol(AS_SYMBOL(dk)[i]);
-            if (kname && strcmp(kname, "fn") == 0) {
-                fn_val = clone_obj(AS_LIST(dv)[i]);
-                break;
-            }
-        }
-    }
-    if (fn_val) {
-        rule->fn = fn_val;
-    }
-
-    w->num_rules++;
-    return clone_obj(widget_obj);
 }
 
-// Evaluate all rules against final_data, populating widget overlays.
-// Called on Rayforce thread during fn_draw.
 static void evaluate_rules(rfui_widget_t* w, obj_p final_data) {
     if (!w) return;
 
@@ -484,99 +432,82 @@ static void evaluate_rules(rfui_widget_t* w, obj_p final_data) {
     }
     w->num_overlays[back] = 0;
 
-    if (w->num_rules == 0) return;
     if (!final_data || final_data->type != TYPE_TABLE) return;
 
-    // Get table columns for building lambda args
-    obj_p keys = AS_LIST(final_data)[0];   // symbol vector
-    obj_p vals = AS_LIST(final_data)[1];   // list of column vectors
+    obj_p keys = AS_LIST(final_data)[0];
+    obj_p vals = AS_LIST(final_data)[1];
     if (!keys || !vals) return;
     i64_t ncols = keys->len;
 
-    for (int ri = 0; ri < w->num_rules; ri++) {
-        rfui_rule_t* rule = &w->rules[ri];
-        if (!rule->expr[0]) continue;
+    for (i64_t c = 0; c < ncols && c < MAX_COLS; c++) {
+        rfui_col_rules_t* cr = &w->col_rules[c];
+        if (cr->num_rules == 0) continue;
 
-        // Build single-arg lambda with let statements that extract columns:
-        // "(fn [_d] (let col1 (at _d 'col1)) (let col2 (at _d 'col2)) ... expr)"
-        // Rayfall let: (let name value) — statement in function body
-        // Rayfall at:  (at table 'col) — column accessor
-        char lambda_buf[2048];
-        int pos = 0;
-        pos += snprintf(lambda_buf + pos, sizeof(lambda_buf) - pos, "(fn [_d] ");
-        for (i64_t c = 0; c < ncols; c++) {
-            const char* name = str_from_symbol(AS_SYMBOL(keys)[c]);
-            if (!name) continue;
-            pos += snprintf(lambda_buf + pos, sizeof(lambda_buf) - pos,
-                            "(let %s (at _d '%s)) ", name, name);
-            if (pos >= (int)sizeof(lambda_buf) - 300) break;
-        }
-        pos += snprintf(lambda_buf + pos, sizeof(lambda_buf) - pos, "%s)", rule->expr);
+        const char* col_name = str_from_symbol(AS_SYMBOL(keys)[c]);
+        if (!col_name) continue;
 
-        // Parse the lambda
-        obj_p lambda = parse_str(lambda_buf);
-        if (!lambda || IS_ERR(lambda)) {
-            if (lambda) drop_obj(lambda);
-            continue;
-        }
+        for (int ri = 0; ri < cr->num_rules; ri++) {
+            rfui_rule_t* rule = &cr->rules[ri];
+            const char* op_str = op_to_str(rule->op);
+            if (!op_str) continue;
+            if (!rule->value[0]) continue;
 
-        // Call: (lambda final_data) using vn_list — same as post_query
-        obj_p data_clone = clone_obj(final_data);
-        if (!data_clone) { drop_obj(lambda); continue; }
-        obj_p call = vn_list(2, lambda, data_clone);
-        if (!call) { drop_obj(lambda); drop_obj(data_clone); continue; }
+            // Build lambda: "(fn [_d] (let COL (at _d 'COL)) (OP COL VALUE))"
+            // For in/within: "(fn [_d] (let COL (at _d 'COL)) (in COL (list V1 V2 ...)))"
+            char lambda_buf[2048];
+            if (rule->op == RFUI_OP_IN || rule->op == RFUI_OP_WITHIN) {
+                snprintf(lambda_buf, sizeof(lambda_buf),
+                    "(fn [_d] (let %s (at _d '%s)) (%s %s (list %s)))",
+                    col_name, col_name, op_str, col_name, rule->value);
+            } else {
+                snprintf(lambda_buf, sizeof(lambda_buf),
+                    "(fn [_d] (let %s (at _d '%s)) (%s %s %s))",
+                    col_name, col_name, op_str, col_name, rule->value);
+            }
 
-        obj_p result = eval_obj(call);
-        if (!result || IS_ERR(result)) {
-            if (result) drop_obj(result);
-            continue;
-        }
+            obj_p lambda = parse_str(lambda_buf);
+            if (!lambda || IS_ERR(lambda)) {
+                if (lambda) drop_obj(lambda);
+                continue;
+            }
 
-        // Result should be a boolean vector
-        if (result->type == TYPE_B8) {
-            if (rule->color && w->num_overlays[back] < MAX_RULES) {
-                rfui_color_overlay_t* ov = &w->overlays[back][w->num_overlays[back]++];
-                // Find which column the rule expression references
-                i64_t matched_col = -1;  // -1 = whole row (fallback)
-                for (i64_t c = 0; c < ncols; c++) {
-                    const char* name = str_from_symbol(AS_SYMBOL(keys)[c]);
-                    if (name && strstr(rule->expr, name)) {
-                        matched_col = c;
-                        break;
+            obj_p data_clone = clone_obj(final_data);
+            if (!data_clone) { drop_obj(lambda); continue; }
+            obj_p call = vn_list(2, lambda, data_clone);
+            if (!call) { drop_obj(lambda); drop_obj(data_clone); continue; }
+
+            obj_p result = eval_obj(call);
+            if (!result || IS_ERR(result)) {
+                if (result) drop_obj(result);
+                continue;
+            }
+
+            if (result->type == TYPE_B8) {
+                if (rule->color && w->num_overlays[back] < MAX_OVERLAYS) {
+                    rfui_color_overlay_t* ov = &w->overlays[back][w->num_overlays[back]++];
+                    ov->col_idx = c;
+                    ov->mask = result;
+                    ov->color = rule->color;
+                } else if (rule->fn) {
+                    obj_p col_vec = AS_LIST(vals)[c];
+                    if (col_vec) {
+                        b8_t* mask_data = AS_B8(result);
+                        for (i64_t row = 0; row < result->len; row++) {
+                            if (!mask_data[row]) continue;
+                            obj_p cell = at_idx(col_vec, row);
+                            if (!cell) continue;
+                            vm_stack_push(cell);
+                            obj_p r = lambda_call(rule->fn, vm_stack_peek(0), 1);
+                            if (r && !IS_ERR(r)) drop_obj(r);
+                        }
                     }
+                    drop_obj(result);
+                } else {
+                    drop_obj(result);
                 }
-                ov->col_idx = matched_col;
-                ov->mask = result; // take ownership
-                ov->color = rule->color;
-            } else if (rule->fn) {
-                // Find which column the rule expression references
-                obj_p col_vec = NULL;
-                obj_p col_vecs = AS_LIST(final_data)[1];
-                for (i64_t c = 0; c < ncols; c++) {
-                    const char* name = str_from_symbol(AS_SYMBOL(keys)[c]);
-                    if (name && strstr(rule->expr, name)) {
-                        col_vec = AS_LIST(col_vecs)[c];
-                        break;
-                    }
-                }
-                if (!col_vec) { drop_obj(result); continue; }
-
-                // Call lambda with cell value for each matching row
-                b8_t* mask_data = AS_B8(result);
-                for (i64_t row = 0; row < result->len; row++) {
-                    if (!mask_data[row]) continue;
-                    obj_p cell = at_idx(col_vec, row);
-                    if (!cell) continue;
-                    vm_stack_push(cell);
-                    obj_p r = lambda_call(rule->fn, vm_stack_peek(0), 1);
-                    if (r && !IS_ERR(r)) drop_obj(r);
-                }
-                drop_obj(result);
             } else {
                 drop_obj(result);
             }
-        } else {
-            drop_obj(result);
         }
     }
 }
@@ -605,9 +536,6 @@ static void register_rfui_functions(void) {
 
     // Register draw function: (draw widget data) -> widget
     RFUI_REGISTER_FN(functions, "draw", TYPE_VARY, FN_NONE, fn_draw);
-
-    // Register rule function: (rule widget {expr: "..." color: 0xFF}) -> widget
-    RFUI_REGISTER_FN(functions, "rule", TYPE_VARY, FN_NONE, fn_rule);
 
     // Register alert function: (alert "message") -> null
     RFUI_REGISTER_FN(functions, "alert", TYPE_VARY, FN_NONE, fn_alert);
