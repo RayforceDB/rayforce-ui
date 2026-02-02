@@ -4,7 +4,7 @@
 
 #define RFUI_VERSION_MAJOR 0
 #define RFUI_VERSION_MINOR 1
-#define RFUI_VERSION_PATCH 4
+#define RFUI_VERSION_PATCH 5
 
 #define RFUI_STR_(x) #x
 #define RFUI_STR(x)  RFUI_STR_(x)

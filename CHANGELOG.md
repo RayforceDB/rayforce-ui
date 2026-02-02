@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.1.5 — 2026-02-02
+
+- Professional dark theme with brand gold (#E9A033) accents
+- Zed-style flat UI: zero rounding, thin borders
+- Bump fonts to 36/80px
+- Remove window control button borders
+- Fix bolt color to match logo
+
 ## v0.1.3 — 2026-01-31
 
 - Only link dbghelp in debug builds on Windows
