@@ -118,13 +118,30 @@ static void render_ansi_text(const char* text, ImVec4 default_color) {
             p++;
         }
 
-        // Render text span if any
+        // Render text span, splitting at newlines so SameLine
+        // only joins segments within the same line
         if (p > span_start) {
-            ImGui::PushStyleColor(ImGuiCol_Text, current_color);
-            ImGui::TextUnformatted(span_start, p);
-            ImGui::PopStyleColor();
-            // SameLine for next span on same line (no newline between spans)
-            if (*p) ImGui::SameLine(0, 0);
+            const char* seg = span_start;
+            while (seg < p) {
+                // Find next newline within this span
+                const char* nl = seg;
+                while (nl < p && *nl != '\n') nl++;
+
+                if (nl > seg) {
+                    ImGui::PushStyleColor(ImGuiCol_Text, current_color);
+                    ImGui::TextUnformatted(seg, nl);
+                    ImGui::PopStyleColor();
+                    // Continue on same line unless next char is newline
+                    if (nl < p || *p) ImGui::SameLine(0, 0);
+                }
+
+                if (nl < p && *nl == '\n') {
+                    // Newline: break the SameLine chain
+                    ImGui::NewLine();
+                    nl++;
+                }
+                seg = nl;
+            }
         }
 
         if (!*p) break;

@@ -170,7 +170,7 @@ endif
 default: $(TARGET)
 debug: $(TARGET)
 
-EMBED_ASSETS = assets/fonts/SpaceMono-Bold.ttf assets/fonts/fa-solid-900.otf assets/images/logo.svg assets/images/icon.svg
+EMBED_ASSETS = assets/fonts/FiraCode-Bold.ttf assets/fonts/fa-solid-900.otf assets/images/logo.svg assets/images/icon.svg
 
 src/embed_assets.h: $(EMBED_ASSETS) scripts/embed.sh
 	sh scripts/embed.sh $(EMBED_ASSETS) > $@
@@ -203,15 +203,15 @@ $(TARGET): $(OBJ_C) $(OBJ_CXX) $(IMGUI_OBJ) $(IMPLOT_OBJ) $(FILEDIALOG_OBJ) $(GL
 	$(CXX) -Wl,/map:$@.map -o $@ $(filter-out $(RAYFORCE_LIB),$^) $(RAYFORCE_LIB) $(LIBS) $(LIBS_DEBUG)
 else
 $(TARGET): $(OBJ_C) $(OBJ_CXX) $(IMGUI_OBJ) $(IMPLOT_OBJ) $(FILEDIALOG_OBJ) $(GLFW_OBJ) $(RAYFORCE_LIB)
-	$(CXX) -nostdlib++ -o $@ $(filter-out $(RAYFORCE_LIB),$^) $(RAYFORCE_LIB) $(LIBS)
+	$(CXX) -nostdlib++ -rdynamic -o $@ $(filter-out $(RAYFORCE_LIB),$^) $(RAYFORCE_LIB) $(LIBS)
 endif
 
 # C source compilation for rayforce-ui
-src/%.o: src/%.c
+src/%.o: src/%.c | deps
 	$(CC) $(CFLAGS) $(INCLUDES_C) -c $< -o $@
 
 # C++ source compilation for rayforce-ui
-src/%.o: src/%.cpp
+src/%.o: src/%.cpp | deps
 	$(CXX) $(CXXFLAGS) $(INCLUDES_CXX) -c $< -o $@
 
 # C++ source compilation for ImGui
@@ -245,7 +245,7 @@ deps:
 clean:
 	rm -f src/embed_assets.h
 	rm -f $(OBJ_C) $(OBJ_CXX) $(IMGUI_OBJ) $(IMPLOT_OBJ) $(FILEDIALOG_OBJ) $(GLFW_OBJ) $(TARGET)
-	$(MAKE) -C $(RAYFORCE_DIR) clean
+	@if [ -d "$(RAYFORCE_DIR)" ]; then $(MAKE) -C $(RAYFORCE_DIR) clean; fi
 	rm -f $(RAYFORCE_LIB)
 
 .PHONY: default debug release clean deps
