@@ -106,7 +106,7 @@ void rfui_logo_render(void) {
 
     // Subtle watermark effect
     bg->AddImage((ImTextureID)(intptr_t)g_logo_texture, p0, p1,
-                 ImVec2(0, 0), ImVec2(1, 1), IM_COL32(255, 255, 255, 30));
+                 ImVec2(0, 0), ImVec2(1, 1), IM_COL32(255, 255, 255, 100));
 }
 
 void rfui_logo_destroy(void) {
