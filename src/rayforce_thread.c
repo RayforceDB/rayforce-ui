@@ -454,16 +454,18 @@ static void evaluate_rules(rfui_widget_t* w, obj_p final_data) {
 
             // Build lambda: "(fn [_d] (let COL (at _d 'COL)) (OP COL VALUE))"
             // For in/within: "(fn [_d] (let COL (at _d 'COL)) (in COL (list V1 V2 ...)))"
-            char lambda_buf[2048];
+            char lambda_buf[4096];
+            int written;
             if (rule->op == RFUI_OP_IN || rule->op == RFUI_OP_WITHIN) {
-                snprintf(lambda_buf, sizeof(lambda_buf),
+                written = snprintf(lambda_buf, sizeof(lambda_buf),
                     "(fn [_d] (let %s (at _d '%s)) (%s %s (list %s)))",
                     col_name, col_name, op_str, col_name, rule->value);
             } else {
-                snprintf(lambda_buf, sizeof(lambda_buf),
+                written = snprintf(lambda_buf, sizeof(lambda_buf),
                     "(fn [_d] (let %s (at _d '%s)) (%s %s %s))",
                     col_name, col_name, op_str, col_name, rule->value);
             }
+            if (written >= (int)sizeof(lambda_buf)) continue;  // truncated
 
             obj_p lambda = parse_str(lambda_buf);
             if (!lambda || IS_ERR(lambda)) {

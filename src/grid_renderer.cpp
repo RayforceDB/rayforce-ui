@@ -453,6 +453,12 @@ nil_t rfui_render_grid(rfui_widget_t* widget) {
 
             // Column popup menu
             if (ImGui::BeginPopup(popup_id)) {
+                if (ci >= MAX_COLS) {
+                    ImGui::TextDisabled("Column index exceeds limit");
+                    ImGui::EndPopup();
+                    ImGui::PopID();
+                    continue;
+                }
                 ImGui::Text("%s", col_name);
                 ImGui::Separator();
 
