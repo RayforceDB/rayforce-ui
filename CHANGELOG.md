@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.1.8 — 2026-02-02
+
+- Toast notifications: auto-dismiss popups replace scrolling alert panel
+- Zero-copy obj_p transfer for all cross-thread data (no more malloc'd strings)
+- Rule callbacks compiled once via lambda_call with cell value from at_idx
+- Remove dead fn_expr/fn_dirty fields and msg->text field
+- Widget rules/trigger system with color overlays and fn callbacks
+
 ## v0.1.7 — 2026-02-02
 
 - Increase logo watermark brightness
