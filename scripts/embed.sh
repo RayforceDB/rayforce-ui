@@ -15,9 +15,8 @@ for f in "$@"; do
         # SVG: embed as C string (null-terminated)
         echo "static const unsigned char ${name}[] ="
         sed 's/\\/\\\\/g; s/"/\\"/g; s/^/    "/; s/$/\\n"/' "$f"
-        echo "    \"\\0\";"
+        echo "    ;"
         size=$(wc -c < "$f")
-        size=$((size + 1))
         echo "static const unsigned int ${name}_len = ${size};"
     else
         # Binary: use xxd

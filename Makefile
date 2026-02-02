@@ -167,14 +167,15 @@ ifeq (,$(IS_WINDOWS))
 TARGET = rayforce-ui
 endif
 
+default: $(TARGET)
+debug: $(TARGET)
+
 EMBED_ASSETS = assets/fonts/JetBrainsMono-Regular.ttf assets/fonts/fa-solid-900.otf assets/images/logo.svg assets/images/icon.svg
 
 src/embed_assets.h: $(EMBED_ASSETS) scripts/embed.sh
 	sh scripts/embed.sh $(EMBED_ASSETS) > $@
 
 $(OBJ_CXX): src/embed_assets.h
-
-default: $(TARGET)
 
 ifneq (,$(IS_WINDOWS))
 release: CFLAGS = -include $(RAYFORCE_DIR)/core/def.h -Wall -Wextra -std=$(STD) -O3 -DNDEBUG -D_CRT_SECURE_NO_WARNINGS
@@ -245,5 +246,6 @@ clean:
 	rm -f src/embed_assets.h
 	rm -f $(OBJ_C) $(OBJ_CXX) $(IMGUI_OBJ) $(IMPLOT_OBJ) $(FILEDIALOG_OBJ) $(GLFW_OBJ) $(TARGET)
 	$(MAKE) -C $(RAYFORCE_DIR) clean
+	rm -f $(RAYFORCE_LIB)
 
-.PHONY: default release clean deps
+.PHONY: default debug release clean deps
