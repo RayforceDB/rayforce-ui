@@ -28,6 +28,9 @@
 #define ICON_CHECK       "\xef\x80\x8c"  // f00c - enabled/checkbox
 #define ICON_EYE         "\xef\x81\xae"  // f06e - visible/enabled
 #define ICON_FILTER      "\xef\x82\xb0"  // f0b0 - filter
+#define ICON_SORT_UP     "\xef\x83\x9e"  // f0de - fa-sort-up (caret-up)
+#define ICON_SORT_DOWN   "\xef\x83\x9d"  // f0dd - fa-sort-down (caret-down)
+#define ICON_CHEVRON_DN  "\xef\x81\xb8"  // f078 - fa-chevron-down
 #define ICON_BELL        "\xef\x83\xb3"  // f0f3 - fa-bell
 
 // Window controls (custom title bar)
