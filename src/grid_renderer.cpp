@@ -439,6 +439,9 @@ nil_t rfui_render_grid(rfui_widget_t* widget) {
     // Use available content region for table
     ImVec2 outer_size = ImVec2(0.0f, 0.0f);
 
+    // Increase cell padding for better data separation
+    ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(12.0f, 6.0f));
+
     if (ImGui::BeginTable("##grid", (int)ncols, table_flags, outer_size)) {
         // Setup columns with headers
         for (i64_t col_idx = 0; col_idx < ncols; col_idx++) {
@@ -519,6 +522,12 @@ nil_t rfui_render_grid(rfui_widget_t* widget) {
 
         // Cache column pointers for performance (avoid repeated AS_LIST dereference)
         obj_p* cols = AS_LIST(vals);
+
+        // Use regular (non-bold) font for data cells
+        ImGuiIO& io = ImGui::GetIO();
+        if (io.Fonts->Fonts.Size > 2) {
+            ImGui::PushFont(io.Fonts->Fonts[2]);
+        }
 
         while (clipper.Step()) {
             for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; row++) {
@@ -634,8 +643,16 @@ nil_t rfui_render_grid(rfui_widget_t* widget) {
         }
 
         clipper.End();
+
+        // Pop regular font
+        ImGuiIO& io_pop = ImGui::GetIO();
+        if (io_pop.Fonts->Fonts.Size > 2) {
+            ImGui::PopFont();
+        }
+
         ImGui::EndTable();
     }
+    ImGui::PopStyleVar();  // CellPadding
 
     // Column dropdown popup — opened once on click frame
     if (ui_state && ui_state->menu_open_request) {

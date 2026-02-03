@@ -170,7 +170,7 @@ endif
 default: $(TARGET)
 debug: $(TARGET)
 
-EMBED_ASSETS = assets/fonts/FiraCode-Bold.ttf assets/fonts/fa-solid-900.otf assets/images/logo.svg assets/images/icon.svg
+EMBED_ASSETS = assets/fonts/IBMPlexSans-Bold.ttf assets/fonts/IBMPlexSans-Regular.ttf assets/fonts/fa-solid-900.otf assets/images/logo.svg assets/images/icon.svg
 
 src/embed_assets.h: $(EMBED_ASSETS) scripts/embed.sh
 	sh scripts/embed.sh $(EMBED_ASSETS) > $@
@@ -246,11 +246,17 @@ deps:
 EXT_DIR = deps/rayforce/ext
 EXT_RAYKX = $(EXT_DIR)/raykx
 
-# Build extensions and copy to ext/
+# Build extensions and copy to ext/ (skip on Windows - raykx uses POSIX sockets)
+ifneq (,$(IS_WINDOWS))
+ext:
+	@echo "Skipping extensions on Windows (raykx requires POSIX sockets)"
+	@mkdir -p ext
+else
 ext:
 	$(MAKE) -C $(EXT_RAYKX) release
 	@mkdir -p ext
 	@cp $(EXT_RAYKX)/libraykx.so ext/ 2>/dev/null || cp $(EXT_RAYKX)/libraykx.dylib ext/ 2>/dev/null || true
+endif
 
 clean:
 	rm -f src/embed_assets.h

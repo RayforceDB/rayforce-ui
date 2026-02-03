@@ -177,11 +177,11 @@ i32_t rfui_ui_init(nil_t) {
     // Apply dashboard theme (replaces StyleColorsDark)
     rfui_theme_apply();
 
-    // Load Fira Code + FontAwesome as the single UI font (index 0)
+    // Load IBM Plex Sans Bold + FontAwesome as the main UI font (index 0)
     float font_size = 30.0f;
     ImFontConfig font_cfg;
     font_cfg.FontDataOwnedByAtlas = false;
-    io.Fonts->AddFontFromMemoryTTF((void*)embed_FiraCode_Bold_ttf, embed_FiraCode_Bold_ttf_len, font_size, &font_cfg);
+    io.Fonts->AddFontFromMemoryTTF((void*)embed_IBMPlexSans_Bold_ttf, embed_IBMPlexSans_Bold_ttf_len, font_size, &font_cfg);
 
     static const ImWchar icon_ranges[] = { 0xf000, 0xf8ff, 0 };
     float icon_size = font_size * 0.75f;
@@ -193,11 +193,16 @@ i32_t rfui_ui_init(nil_t) {
     icon_cfg.FontDataOwnedByAtlas = false;
     io.Fonts->AddFontFromMemoryTTF((void*)embed_fa_solid_900_otf, embed_fa_solid_900_otf_len, icon_size, &icon_cfg, icon_ranges);
 
-    // Large Fira Code for text/label widgets (index 1)
+    // Large IBM Plex Sans for text/label widgets (index 1)
     float large_font_size = 64.0f;
     ImFontConfig large_cfg;
     large_cfg.FontDataOwnedByAtlas = false;
-    io.Fonts->AddFontFromMemoryTTF((void*)embed_FiraCode_Bold_ttf, embed_FiraCode_Bold_ttf_len, large_font_size, &large_cfg);
+    io.Fonts->AddFontFromMemoryTTF((void*)embed_IBMPlexSans_Bold_ttf, embed_IBMPlexSans_Bold_ttf_len, large_font_size, &large_cfg);
+
+    // Regular IBM Plex Sans for grid data cells (index 2)
+    ImFontConfig regular_cfg;
+    regular_cfg.FontDataOwnedByAtlas = false;
+    io.Fonts->AddFontFromMemoryTTF((void*)embed_IBMPlexSans_Regular_ttf, embed_IBMPlexSans_Regular_ttf_len, font_size, &regular_cfg);
 
     // Setup Platform/Renderer backends
     ImGui_ImplGlfw_InitForOpenGL(g_window, true);
