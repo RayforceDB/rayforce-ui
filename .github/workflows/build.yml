@@ -21,11 +21,14 @@ jobs:
       - name: Build
         run: make release -j$(nproc)
 
+      - name: Build extensions
+        run: make ext
+
       - name: Package
         run: |
           mkdir -p dist/rayforce-ui
           cp rayforce-ui CHANGELOG.md dist/rayforce-ui/
-          cp -r examples dist/rayforce-ui/
+          cp -r examples ext dist/rayforce-ui/
           cd dist && tar czf rayforce-ui-linux-x64.tar.gz rayforce-ui
 
       - name: Upload artifact
@@ -61,11 +64,14 @@ jobs:
       - name: Build
         run: make release -j$(nproc)
 
+      - name: Build extensions
+        run: make ext
+
       - name: Package
         run: |
           mkdir -p dist/rayforce-ui
           cp rayforce-ui.exe CHANGELOG.md dist/rayforce-ui/
-          cp -r examples dist/rayforce-ui/
+          cp -r examples ext dist/rayforce-ui/
           cd dist && zip -r rayforce-ui-windows-x64.zip rayforce-ui
 
       - name: Upload artifact
@@ -85,11 +91,14 @@ jobs:
       - name: Build
         run: make release -j$(sysctl -n hw.ncpu)
 
+      - name: Build extensions
+        run: make ext
+
       - name: Package
         run: |
           mkdir -p dist/rayforce-ui
           cp rayforce-ui CHANGELOG.md dist/rayforce-ui/
-          cp -r examples dist/rayforce-ui/
+          cp -r examples ext dist/rayforce-ui/
           cd dist && tar czf rayforce-ui-macos-arm64.tar.gz rayforce-ui
 
       - name: Upload artifact
