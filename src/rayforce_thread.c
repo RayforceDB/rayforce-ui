@@ -589,7 +589,24 @@ void* rfui_rayforce_thread(void* arg) {
     // Step 4: Register rayforce-ui functions (widget, draw)
     register_rfui_functions();
 
-    // Step 5: Load script file if provided via command line
+    // Step 5: Create poll waker for UI messages
+    waker = poll_waker_create(runtime->poll, on_ui_message, ctx);
+    if (!waker) {
+        g_ctx = NULL;
+        runtime_destroy();
+        rfui_ctx_set_quit(ctx, B8_TRUE);
+        rfui_ctx_signal_ready(ctx);
+        return NULL;
+    }
+
+    // Step 6: Store waker in context and signal ready
+    // Signal ready BEFORE loading script so UI loop can start
+    // while potentially slow script operations (IPC, file I/O) execute
+    rfui_ctx_set_waker(ctx, waker);
+    rfui_ctx_signal_ready(ctx);
+
+    // Step 7: Load script file if provided via command line
+    // This may take time (e.g., synchronous IPC calls) but UI is now responsive
     {
         obj_p file_arg = runtime_get_arg("file");
         if (!is_null(file_arg)) {
@@ -607,23 +624,7 @@ void* rfui_rayforce_thread(void* arg) {
         }
     }
 
-    // Step 6: Create poll waker for UI messages
-    waker = poll_waker_create(runtime->poll, on_ui_message, ctx);
-    if (!waker) {
-        g_ctx = NULL;
-        runtime_destroy();
-        rfui_ctx_set_quit(ctx, B8_TRUE);
-        rfui_ctx_signal_ready(ctx);
-        return NULL;
-    }
-
-    // Step 7: Store waker in context
-    rfui_ctx_set_waker(ctx, waker);
-
-    // Step 8: Signal ready
-    rfui_ctx_signal_ready(ctx);
-
-    // Step 9: Run poll loop (blocks until exit)
+    // Step 8: Run poll loop (blocks until exit)
     runtime_run();
 
     // Cleanup
