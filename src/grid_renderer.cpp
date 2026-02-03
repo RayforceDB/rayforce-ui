@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <unordered_map>
 
 #include "imgui.h"
 #include "../include/rfui/icons.h"
@@ -26,8 +27,24 @@ extern rfui_ctx_t* g_ctx;
 static const char* op_names[] = { ">", "<", ">=", "<=", "==", "!=", "in", "within" };
 static const int op_count = 8;
 
+// Flash highlight duration in seconds
+static const float FLASH_DURATION = 0.5f;
+
+// Cell change tracking entry
+struct cell_change_t {
+    i64_t value;        // previous cell value
+    double change_time; // time when value changed
+};
+
+// Hash function for (row, col) pairs
+struct pair_hash {
+    size_t operator()(const std::pair<int, int>& p) const {
+        return std::hash<int>()(p.first) ^ (std::hash<int>()(p.second) << 16);
+    }
+};
+
 // UI state for grid selection (stored in widget->ui_state)
-typedef struct grid_ui_state_t {
+struct grid_ui_state_t {
     int selected_row;       // -1 = no selection
     int menu_col;           // column index for dropdown menu, -1 = none
     bool menu_open_request; // true on the frame header was clicked
@@ -41,7 +58,9 @@ typedef struct grid_ui_state_t {
     float builder_color[3]; // RGB
     float builder_pos[2];   // popup anchor position
     char builder_expr[512]; // expression for expression rules
-} grid_ui_state_t;
+    // Change tracking for flash highlights
+    std::unordered_map<std::pair<int, int>, cell_change_t, pair_hash> cell_changes;
+};
 
 // Helper to send MSG_SET_POST_QUERY to Rayforce thread
 static void send_post_query(rfui_widget_t* widget, const char* expr) {
@@ -122,6 +141,29 @@ static char* build_row_filter_expr(int row_index) {
     if (!buf) return nullptr;
     snprintf(buf, 64, "{[x] (take 1 (drop %d x))}", row_index);
     return buf;
+}
+
+// Get cell value as i64 for comparison (works for most numeric types)
+static i64_t get_cell_value(obj_p col, i64_t row) {
+    if (!col || row < 0 || row >= col->len) return 0;
+    switch (col->type) {
+        case TYPE_I64:
+        case TYPE_TIMESTAMP: return AS_I64(col)[row];
+        case TYPE_I32:
+        case TYPE_DATE:
+        case TYPE_TIME:      return AS_I32(col)[row];
+        case TYPE_I16:       return AS_I16(col)[row];
+        case TYPE_F64: {
+            // Use memcpy to avoid FPE on signaling NaN (null values)
+            i64_t bits;
+            memcpy(&bits, &AS_F64(col)[row], sizeof(bits));
+            return bits;
+        }
+        case TYPE_SYMBOL:    return AS_SYMBOL(col)[row];
+        case TYPE_B8:        return AS_B8(col)[row];
+        case TYPE_U8:        return AS_U8(col)[row];
+        default:             return 0;
+    }
 }
 
 // Helper function to render a single cell based on column type
@@ -341,10 +383,10 @@ nil_t rfui_render_grid(rfui_widget_t* widget) {
         }
     }
 
-    // Initialize UI state if needed
+    // Initialize UI state if needed (must use new for C++ members like unordered_map)
     grid_ui_state_t* ui_state = (grid_ui_state_t*)widget->ui_state;
     if (!ui_state) {
-        ui_state = (grid_ui_state_t*)calloc(1, sizeof(grid_ui_state_t));
+        ui_state = new grid_ui_state_t();
         if (ui_state) {
             ui_state->selected_row = -1;
             ui_state->editing_col = -1;
@@ -522,6 +564,33 @@ nil_t rfui_render_grid(rfui_widget_t* widget) {
                         ImGui::SameLine();
                     }
 
+                    // Check for cell value change (flash highlight)
+                    bool flash_active = false;
+                    float flash_alpha = 0.0f;
+                    if (ui_state) {
+                        auto key = std::make_pair(row, (int)col_idx);
+                        i64_t current_val = get_cell_value(col, row);
+                        double now = ImGui::GetTime();
+
+                        auto it = ui_state->cell_changes.find(key);
+                        if (it != ui_state->cell_changes.end()) {
+                            // Check if value changed
+                            if (it->second.value != current_val) {
+                                it->second.value = current_val;
+                                it->second.change_time = now;
+                            }
+                            // Check if still flashing
+                            double elapsed = now - it->second.change_time;
+                            if (elapsed < FLASH_DURATION) {
+                                flash_active = true;
+                                flash_alpha = 1.0f - (float)(elapsed / FLASH_DURATION);
+                            }
+                        } else {
+                            // First time seeing this cell - just record value, no flash
+                            ui_state->cell_changes[key] = { current_val, 0.0 };
+                        }
+                    }
+
                     // Check overlay rules for this cell
                     bool cell_colored = false;
                     for (int oi = 0; oi < ov_count; oi++) {
@@ -538,6 +607,12 @@ nil_t rfui_render_grid(rfui_widget_t* widget) {
                                 break;
                             }
                         }
+                    }
+
+                    // Apply flash highlight (green background fade)
+                    if (flash_active) {
+                        ImU32 flash_color = ImGui::GetColorU32(ImVec4(0.2f, 0.8f, 0.3f, flash_alpha * 0.5f));
+                        ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg, flash_color);
                     }
 
                     // Render cell with zero-copy direct buffer access

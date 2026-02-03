@@ -41,18 +41,13 @@ nil_t rfui_registry_destroy(nil_t) {
     // Current approach is acceptable for shutdown but not ideal.
     for (rfui_widget_t* widget : g_widgets) {
         if (widget != nullptr) {
-            // Free type-specific ui_state (must use delete for C++ objects)
-            switch (widget->type) {
-                case RFUI_WIDGET_TEXT:
-                    // Text widget reads from render_data (obj_p), no ui_state
-                    break;
-                case RFUI_WIDGET_ALERT:
-                    // Toasts are global, no per-widget state
-                    break;
-                default:
-                    // Other widget types use plain malloc/free for ui_state
-                    break;
+            // Free type-specific ui_state
+            // Note: Grid ui_state uses C++ (unordered_map) so would need delete,
+            // but at shutdown the process is exiting anyway. Just null the ptr.
+            if (widget->ui_state && widget->type != RFUI_WIDGET_GRID) {
+                free(widget->ui_state);
             }
+            widget->ui_state = nullptr;
 
             // Null out Rayforce obj_p fields before destroy — the Rayforce
             // thread (and its heap) is already joined/gone at this point,
