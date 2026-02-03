@@ -58,6 +58,8 @@ struct grid_ui_state_t {
     float builder_color[3]; // RGB
     float builder_pos[2];   // popup anchor position
     char builder_expr[512]; // expression for expression rules
+    // Flash highlight settings
+    bool flash_enabled = true;
     // Change tracking for flash highlights
     std::unordered_map<std::pair<int, int>, cell_change_t, pair_hash> cell_changes;
 };
@@ -416,6 +418,13 @@ nil_t rfui_render_grid(rfui_widget_t* widget) {
 
     ImGui::Separator();
 
+    // Grid toolbar
+    if (ui_state) {
+        ImGui::Checkbox("Flash on change", &ui_state->flash_enabled);
+        ImGui::SameLine();
+        ImGui::TextDisabled("| %lld rows", nrows);
+    }
+
     // Create ImGui table with virtualization
     ImGuiTableFlags table_flags =
         ImGuiTableFlags_Resizable |
@@ -567,7 +576,7 @@ nil_t rfui_render_grid(rfui_widget_t* widget) {
                     // Check for cell value change (flash highlight)
                     bool flash_active = false;
                     float flash_alpha = 0.0f;
-                    if (ui_state) {
+                    if (ui_state && ui_state->flash_enabled) {
                         auto key = std::make_pair(row, (int)col_idx);
                         i64_t current_val = get_cell_value(col, row);
                         double now = ImGui::GetTime();
