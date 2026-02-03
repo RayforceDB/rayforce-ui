@@ -242,10 +242,22 @@ deps:
 		git clone --depth 1 https://github.com/RayforceDB/rayforce.git $(RAYFORCE_DIR); \
 	fi
 
+# Extension directories
+EXT_DIR = deps/rayforce/ext
+EXT_RAYKX = $(EXT_DIR)/raykx
+
+# Build extensions and copy to ext/
+ext:
+	$(MAKE) -C $(EXT_RAYKX) release
+	@mkdir -p ext
+	@cp $(EXT_RAYKX)/libraykx.so ext/ 2>/dev/null || cp $(EXT_RAYKX)/libraykx.dylib ext/ 2>/dev/null || true
+
 clean:
 	rm -f src/embed_assets.h
 	rm -f $(OBJ_C) $(OBJ_CXX) $(IMGUI_OBJ) $(IMPLOT_OBJ) $(FILEDIALOG_OBJ) $(GLFW_OBJ) $(TARGET)
 	@if [ -d "$(RAYFORCE_DIR)" ]; then $(MAKE) -C $(RAYFORCE_DIR) clean; fi
 	rm -f $(RAYFORCE_LIB)
+	$(MAKE) -C $(EXT_RAYKX) clean 2>/dev/null || true
+	rm -rf ext/
 
-.PHONY: default debug release clean deps
+.PHONY: default debug release clean deps ext
