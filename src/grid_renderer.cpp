@@ -132,20 +132,38 @@ static void render_cell(obj_p col, i64_t row) {
     }
 
     switch (col->type) {
-        case TYPE_I64:
-            ImGui::Text("%lld", (long long)AS_I64(col)[row]);
+        case TYPE_I64: {
+            i64_t val = AS_I64(col)[row];
+            if (val == NULL_I64) {
+                ImGui::TextDisabled("0Nl");
+            } else {
+                ImGui::Text("%lld", (long long)val);
+            }
             break;
-        case TYPE_I32:
-            ImGui::Text("%d", AS_I32(col)[row]);
+        }
+        case TYPE_I32: {
+            i32_t val = AS_I32(col)[row];
+            if (val == NULL_I32) {
+                ImGui::TextDisabled("0Ni");
+            } else {
+                ImGui::Text("%d", val);
+            }
             break;
-        case TYPE_I16:
-            ImGui::Text("%d", (int)AS_I16(col)[row]);
+        }
+        case TYPE_I16: {
+            i16_t val = AS_I16(col)[row];
+            if (val == NULL_I16) {
+                ImGui::TextDisabled("0Nh");
+            } else {
+                ImGui::Text("%d", (int)val);
+            }
             break;
+        }
         case TYPE_F64: {
             f64_t val = AS_F64(col)[row];
             // Check for NaN (null value in Rayforce)
             if (val != val) {
-                ImGui::TextDisabled("null");
+                ImGui::TextDisabled("0Nf");
             } else {
                 ImGui::Text("%.6g", val);
             }
@@ -157,7 +175,7 @@ static void render_cell(obj_p col, i64_t row) {
             if (str) {
                 ImGui::Text("%s", str);
             } else {
-                ImGui::TextDisabled("null");
+                ImGui::TextDisabled("0Ns");
             }
             break;
         }
@@ -181,7 +199,7 @@ static void render_cell(obj_p col, i64_t row) {
             // Date stored as i32 (days since epoch)
             i32_t d = AS_DATE(col)[row];
             if (d == NULL_I32) {
-                ImGui::TextDisabled("null");
+                ImGui::TextDisabled("0Nd");
             } else {
                 // Simple date format: YYYY.MM.DD
                 // Days since 2000-01-01
@@ -193,7 +211,7 @@ static void render_cell(obj_p col, i64_t row) {
             // Time stored as i32 (milliseconds since midnight)
             i32_t t = AS_TIME(col)[row];
             if (t == NULL_I32) {
-                ImGui::TextDisabled("null");
+                ImGui::TextDisabled("0Nt");
             } else {
                 int ms = t % 1000;
                 int sec = (t / 1000) % 60;
@@ -207,7 +225,7 @@ static void render_cell(obj_p col, i64_t row) {
             // Timestamp stored as i64 (nanoseconds since epoch)
             i64_t ts = AS_TIMESTAMP(col)[row];
             if (ts == NULL_I64) {
-                ImGui::TextDisabled("null");
+                ImGui::TextDisabled("0Np");
             } else {
                 // Display as raw value for now
                 ImGui::Text("%lld", (long long)ts);
@@ -230,7 +248,7 @@ static void render_cell(obj_p col, i64_t row) {
             if (item) {
                 ImGui::TextDisabled("[%s:%lld]", type_name(item->type), (long long)item->len);
             } else {
-                ImGui::TextDisabled("null");
+                ImGui::TextDisabled("0N0");
             }
             break;
         }
@@ -464,7 +482,7 @@ nil_t rfui_render_grid(rfui_widget_t* widget) {
 
                     obj_p col = cols[col_idx];
                     if (col == nullptr) {
-                        ImGui::TextDisabled("null");
+                        ImGui::TextDisabled("0N0");
                         continue;
                     }
 
