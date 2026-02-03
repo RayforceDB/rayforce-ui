@@ -188,7 +188,7 @@ release: CXXFLAGS = -std=c++11 $(GCC_CXX_INCLUDES) $(IMGUI_INCLUDES) $(GLFW_INCL
 release: GLFW_CFLAGS = -fPIC -Wall -std=c99 -O3 -D_GNU_SOURCE $(GLFW_DEFINES) -I$(GLFW_DIR)/include -I$(GLFW_DIR)/src
 endif
 release: RAYFORCE_MAKE_TARGET = lib
-release: $(TARGET)
+release: $(TARGET) ext
 
 # Default to debug build of rayforce
 RAYFORCE_MAKE_TARGET ?= lib-debug
