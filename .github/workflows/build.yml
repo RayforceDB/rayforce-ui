@@ -69,9 +69,7 @@ jobs:
           RAYFORCE_MAKE_TARGET: lib
 
       - name: Build extensions
-        run: |
-          export MSYS2_ARG_CONV_EXCL='/DEF:'
-          make ext
+        run: MSYS2_ARG_CONV_EXCL='/DEF:' make ext
 
       - name: Package
         run: |
