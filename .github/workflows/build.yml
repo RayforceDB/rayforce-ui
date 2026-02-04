@@ -61,15 +61,11 @@ jobs:
       - name: Fetch deps
         run: make deps
 
-      - name: Build main
-        run: |
-          make -C deps/rayforce lib
-          make rayforce-ui.exe -j$(nproc)
-        env:
-          RAYFORCE_MAKE_TARGET: lib
+      - name: Build
+        run: make release -j$(nproc)
 
       - name: Build extensions
-        run: MSYS2_ARG_CONV_EXCL='/DEF:' make ext
+        run: make ext
 
       - name: Package
         run: |
