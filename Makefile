@@ -246,11 +246,13 @@ deps:
 EXT_DIR = deps/rayforce/ext
 EXT_RAYKX = $(EXT_DIR)/raykx
 
-# Build extensions and copy to ext/ (skip on Windows - raykx uses POSIX sockets)
+# Build extensions and copy to ext/
 ifneq (,$(IS_WINDOWS))
 ext:
-	@echo "Skipping extensions on Windows (raykx requires POSIX sockets)"
+	llvm-dlltool -m i386:x86-64 -d $(RAYFORCE_DIR)/rayforce.def -l $(RAYFORCE_DIR)/rayforce.lib -D rayforce-ui.exe
+	$(MAKE) -C $(EXT_RAYKX) release
 	@mkdir -p ext
+	@cp $(EXT_RAYKX)/raykx.dll ext/
 else
 ext:
 	$(MAKE) -C $(EXT_RAYKX) release
