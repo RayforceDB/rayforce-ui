@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.2.0 — 2026-02-04
+
+- Windows extension build: raykx.dll now built and packaged on Windows
+- Grid toolbar with flash toggle button and row count display
+- Flash highlight cells on value change (green/red for increase/decrease)
+- IBM Plex Sans font with increased cell padding
+- Fix null display using native Rayforce format
+- Fix startup freeze when loading scripts
+
 ## v0.1.8 — 2026-02-02
 
 - Toast notifications: auto-dismiss popups replace scrolling alert panel
