@@ -63,9 +63,13 @@ jobs:
 
       - name: Build
         run: make release -j$(nproc)
+        env:
+          MSYS2_ARG_CONV_EXCL: '/DEF:'
 
       - name: Build extensions
         run: make ext
+        env:
+          MSYS2_ARG_CONV_EXCL: '/DEF:'
 
       - name: Package
         run: |
