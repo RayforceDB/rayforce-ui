@@ -1,12 +1,18 @@
-(set .kx.hopen (loadfn "/tmp/libraykx.so" "raykx_hopen" 1))
-(set .kx.hclose (loadfn "/tmp/libraykx.so" "raykx_hclose" 1))
-(set .kx.send (loadfn "/tmp/libraykx.so" "raykx_send" 2))
+(set .kx.hopen (loadfn "ext/libraykx.so" "raykx_hopen" 1))
+(set .kx.hclose (loadfn "ext/libraykx.so" "raykx_hclose" 1))
+(set .kx.send (loadfn "ext/libraykx.so" "raykx_send" 2))
 
 ;; Stats grid
 (set stats-grid (widget {type: 'grid name: "Stats"}))
 
 ;; Risk view
 (set risk-view (widget {type: 'grid name: "Risk View"}))
+
+;; Count delta
+(set count-delta (widget {type: 'text name: "Count Delta"}))
+
+;; Count total
+(set count-total (widget {type: 'text name: "Count Total"}))
 
 ;; Callback to be called by kdb+ server
 (set upd (fn [payload]
@@ -15,17 +21,23 @@
     (draw stats-grid stats)
     (draw risk-view
         (xasc
-            (select {from: stats
-                Entity: EntityID
-                Symbol: Symbol
-                NetPosBPU: (- LPosBPU SPosBPU)
-                OpgQty: (- SSL SSS)
-                Pos: (- OLS OSS)
-            }) ['NetPosBPU]))
-))
+    (select {from: stats
+        Entity: EntityID
+        Symbol: Symbol
+        LPosBPU: LPosBPU
+        SPosBPU: SPosBPU
+        NetPosBPU: (- LPosBPU SPosBPU)
+        OpgQty: (- SSL SSS)
+        Pos: (- OLS OSS)
+        where: (in EntityID [TPCO TPCR])
+    }) ['NetPosBPU]))
+        (draw count-delta (count data))
+        (draw count-total (count stats))
+    ))
 
 ;; Connect to the server
-(set h (.kx.hopen "localhost:60325"))
+(set h (.kx.hopen "rm-metrics-telmio.dev.ath:60326"))
+;; (set h (.kx.hopen "localhost:60325"))
 
 ;; subscribe and get initial data
 (set stats (.kx.send h (list '.net.sub 0)))

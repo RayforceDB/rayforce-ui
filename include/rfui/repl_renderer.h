@@ -14,6 +14,9 @@ nil_t rfui_repl_init(nil_t);
 // Render REPL content (call each frame, inside main window)
 nil_t rfui_repl_render(nil_t);
 
+// Render REPL overlay (call each frame, after all other widgets)
+nil_t rfui_repl_render_overlay(nil_t);
+
 // Add result text to REPL output (called when MSG_RESULT received)
 nil_t rfui_repl_add_result_text(const char* text);
 
