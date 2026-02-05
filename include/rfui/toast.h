@@ -6,16 +6,16 @@
 extern "C" {
 #endif
 
-// Push a toast notification (text is copied internally)
+// Push info toast with default duration
 void rfui_toast_push(const char* text);
 
-// Push from obj_p (TYPE_C8) — zero-copy read, copies to internal storage
-void rfui_toast_push_obj(void* obj);
+// Push toast with severity and duration (type: 0=info,1=success,2=warn,3=error; ms: 0=default 3000)
+void rfui_toast_push_alert(const char* text, int type, int ms);
 
-// Render all active toasts (call each frame after registry render)
+// Render all active toasts (call each frame)
 void rfui_toast_render(void);
 
-// Cleanup toast system
+// Cleanup toast system (no-op)
 void rfui_toast_destroy(void);
 
 #ifdef __cplusplus

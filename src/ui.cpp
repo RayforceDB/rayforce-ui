@@ -340,7 +340,15 @@ i32_t rfui_ui_run(nil_t) {
         case RFUI_MSG_ALERT:
           // Toast notification — data is obj_p (TYPE_C8)
           if (msg->data) {
-            rfui_toast_push_obj(msg->data);
+            // Extract text into local buffer for toast
+            obj_p a = (obj_p)msg->data;
+            if (a->type == TYPE_C8 && a->len > 0) {
+              char buf[4096];
+              i64_t len = a->len < (i64_t)sizeof(buf) - 1 ? a->len : (i64_t)sizeof(buf) - 1;
+              memcpy(buf, AS_C8(a), len);
+              buf[len] = '\0';
+              rfui_toast_push_alert(buf, msg->alert_type, msg->alert_duration);
+            }
             // Queue obj_p for drop on Rayforce thread
             rfui_ui_msg_t *drop_msg =
                 (rfui_ui_msg_t *)malloc(sizeof(rfui_ui_msg_t));

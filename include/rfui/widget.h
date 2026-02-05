@@ -41,8 +41,7 @@ typedef struct rfui_color_overlay_t {
 typedef enum rfui_widget_type_t {
     RFUI_WIDGET_GRID,
     RFUI_WIDGET_CHART,
-    RFUI_WIDGET_TEXT,
-    RFUI_WIDGET_ALERT
+    RFUI_WIDGET_TEXT
 } rfui_widget_type_t;
 
 typedef struct rfui_widget_t {

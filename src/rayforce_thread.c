@@ -165,9 +165,6 @@ static b8_t widget_type_from_symbol(i64_t sym_id, rfui_widget_type_t* out_type) 
     } else if (strcmp(type_str, "text") == 0) {
         *out_type = RFUI_WIDGET_TEXT;
         return B8_TRUE;
-    } else if (strcmp(type_str, "alert") == 0) {
-        *out_type = RFUI_WIDGET_ALERT;
-        return B8_TRUE;
     }
     return B8_FALSE;
 }
@@ -217,7 +214,7 @@ static obj_p fn_widget(obj_p* x, i64_t n) {
     if (!widget_type_from_symbol(type_val->i64, &wtype)) {
         drop_obj(type_val);
         drop_obj(name_val);
-        return ray_err("widget: unknown type (expected 'grid, 'chart, 'text, or 'alert)");
+        return ray_err("widget: unknown type (expected 'grid, 'chart, or 'text)");
     }
     drop_obj(type_val);
 
@@ -348,7 +345,7 @@ static obj_p fn_draw(obj_p* x, i64_t n) {
     msg->widget = w;
 
     // For text/alert widgets, pre-format on Rayforce thread
-    if (w->type == RFUI_WIDGET_TEXT || w->type == RFUI_WIDGET_ALERT) {
+    if (w->type == RFUI_WIDGET_TEXT) {
         obj_p fmt = obj_fmt(final_data, B8_TRUE);
         drop_obj(final_data);
         msg->data = fmt;  // obj_p string, UI reads directly then drops
@@ -363,11 +360,22 @@ static obj_p fn_draw(obj_p* x, i64_t n) {
     return clone_obj(widget_obj);
 }
 
-// fn_alert: (alert "message text")
+// Helper: map alert type symbol to integer (0=info, 1=success, 2=warn, 3=error)
+static i8_t alert_type_from_symbol(i64_t sym_id) {
+    const char* s = str_from_symbol(sym_id);
+    if (!s) return 0;
+    if (strcmp(s, "info") == 0)  return 0;
+    if (strcmp(s, "ok") == 0)    return 1;
+    if (strcmp(s, "warn") == 0)  return 2;
+    if (strcmp(s, "error") == 0) return 3;
+    return 0;  // default to info for unknown
+}
+
+// fn_alert: (alert "message") or (alert {type: 'error text: "fail" duration: 5000})
 // Sends a toast notification to the UI — no widget needed
 static obj_p fn_alert(obj_p* x, i64_t n) {
     if (n != 1) {
-        return ray_err("alert: expects 1 argument (string)");
+        return ray_err("alert: expects 1 argument (string or dict)");
     }
     if (!g_ctx) {
         return ray_err("alert: no rayforce-ui context available");
@@ -376,15 +384,48 @@ static obj_p fn_alert(obj_p* x, i64_t n) {
     obj_p val = x[0];
     if (!val) return atom(-TYPE_NULL);
 
-    // Get or format as obj_p string — stays on rayforce heap
     obj_p text_obj = NULL;
-    if (IS_ERR(val)) {
-        text_obj = obj_fmt(val, B8_FALSE);
+    i8_t  alert_type = 0;      // default: info
+    i32_t alert_duration = 0;  // default: 0 means 3000ms
+
+    if (val->type == TYPE_DICT) {
+        // Extract 'text key (required)
+        obj_p text_val = at_sym(val, "text", 4);
+        if (!text_val) {
+            return ray_err("alert: dict missing 'text key");
+        }
+        if (text_val->type == TYPE_C8) {
+            text_obj = text_val;  // takes ownership
+        } else {
+            text_obj = obj_fmt(text_val, B8_TRUE);
+            drop_obj(text_val);
+        }
+
+        // Extract 'type key (optional symbol)
+        obj_p type_val = at_sym(val, "type", 4);
+        if (type_val) {
+            if (type_val->type == -TYPE_SYMBOL) {
+                alert_type = alert_type_from_symbol(type_val->i64);
+            }
+            drop_obj(type_val);
+        }
+
+        // Extract 'duration key (optional integer)
+        obj_p dur_val = at_sym(val, "duration", 8);
+        if (dur_val) {
+            if (dur_val->type == TYPE_I64) {
+                alert_duration = (i32_t)dur_val->i64;
+            }
+            drop_obj(dur_val);
+        }
     } else if (val->type == TYPE_C8) {
         text_obj = clone_obj(val);
+    } else if (IS_ERR(val)) {
+        text_obj = obj_fmt(val, B8_FALSE);
     } else {
         text_obj = obj_fmt(val, B8_TRUE);
     }
+
     if (!text_obj || text_obj->type != TYPE_C8) {
         if (text_obj) drop_obj(text_obj);
         return atom(-TYPE_NULL);
@@ -397,7 +438,9 @@ static obj_p fn_alert(obj_p* x, i64_t n) {
     }
     msg->type = RFUI_MSG_ALERT;
     msg->widget = NULL;
-    msg->data = text_obj;  // obj_p passed to UI, returned for drop
+    msg->data = text_obj;
+    msg->alert_type = alert_type;
+    msg->alert_duration = alert_duration;
 
     rfui_queue_push(g_ctx->ray_to_ui, msg);
     glfwPostEmptyEvent();

@@ -153,7 +153,7 @@ endif
 INCLUDES_C = -Iinclude -I$(RAYFORCE_DIR)/core $(IMGUI_INCLUDES) $(GLFW_INCLUDES)
 
 # Includes for C++ files (exclude rayforce core to avoid shadowing system headers)
-INCLUDES_CXX = -Iinclude $(IMGUI_INCLUDES) $(GLFW_INCLUDES) -Ideps/nanosvg -I$(FILEDIALOG_DIR)
+INCLUDES_CXX = -Iinclude $(IMGUI_INCLUDES) $(GLFW_INCLUDES) -Ideps/nanosvg -I$(FILEDIALOG_DIR) -Ideps/ImGuiNotify
 
 # C source files
 SRC_C = src/main.c src/queue.c src/widget.c src/context.c src/rayforce_thread.c

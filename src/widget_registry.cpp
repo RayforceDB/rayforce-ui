@@ -86,9 +86,6 @@ static void render_widget(rfui_widget_t* widget) {
     }
 
         // Set minimum size constraints for usability
-        // Alert widgets use toast system — skip panel rendering
-        if (widget->type == RFUI_WIDGET_ALERT) return;
-
         ImGui::SetNextWindowSizeConstraints(ImVec2(400, 300), ImVec2(FLT_MAX, FLT_MAX));
         ImGui::SetNextWindowSize(ImVec2(600, 400), ImGuiCond_FirstUseEver);
 
@@ -99,7 +96,6 @@ static void render_widget(rfui_widget_t* widget) {
             case RFUI_WIDGET_GRID:  icon = ICON_TABLE " ";      break;
             case RFUI_WIDGET_CHART: icon = ICON_CHART_LINE " "; break;
             case RFUI_WIDGET_TEXT:  icon = ICON_FILE_LINES " "; break;
-            case RFUI_WIDGET_ALERT: break; // handled by toast system
             default: break;
         }
         snprintf(window_label, sizeof(window_label), "%s%s", icon, widget->name);
@@ -118,8 +114,6 @@ static void render_widget(rfui_widget_t* widget) {
             case RFUI_WIDGET_TEXT:
                 rfui_render_text(widget);
                 break;
-            case RFUI_WIDGET_ALERT:
-                break; // handled by toast system
             default:
                 ImGui::TextDisabled("Unknown widget type: %d", widget->type);
                 break;

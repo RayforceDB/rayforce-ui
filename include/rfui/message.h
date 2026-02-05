@@ -39,6 +39,8 @@ typedef struct rfui_ray_msg_t {
     rfui_ray_msg_type_t type;
     struct rfui_widget_t* widget;  // Target widget
     obj_p data;                      // Data for rendering
+    i8_t  alert_type;                // 0=info, 1=success, 2=warn, 3=error
+    i32_t alert_duration;            // milliseconds, 0 = default (3000)
 } rfui_ray_msg_t;
 
 #endif // RFUI_MESSAGE_H
