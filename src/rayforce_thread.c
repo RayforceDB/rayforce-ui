@@ -33,6 +33,7 @@ static void process_ui_message(rfui_ctx_t* ctx, rfui_ui_msg_t* msg) {
         case RFUI_MSG_EVAL:
             if (msg->expr) {
                 obj_p result = eval_str(msg->expr);
+                __VM->rc_sync = 1;  // Restore after pool_run may have cleared it
 
                 // Format result as obj_p string — pass directly to UI
                 obj_p fmt = NULL;
@@ -88,12 +89,8 @@ static void process_ui_message(rfui_ctx_t* ctx, rfui_ui_msg_t* msg) {
             }
             break;
 
-        case RFUI_MSG_DROP:
-            // Drop obj_p after render
-            if (msg->obj) {
-                drop_obj(msg->obj);
-            }
-            break;
+        // Note: RFUI_MSG_DROP is no longer used - UI thread now has its own VM
+        // and can call drop_obj() directly. Keeping enum value for ABI stability.
 
         case RFUI_MSG_SET_COL_RULES:
             if (msg->widget && msg->col_rules && msg->col_idx >= 0 && msg->col_idx < MAX_COLS) {
@@ -143,6 +140,9 @@ static void on_ui_message(raw_p data) {
            (msg = (rfui_ui_msg_t*)rfui_queue_pop(ctx->ui_to_ray)) != NULL) {
         process_ui_message(ctx, msg);
     }
+
+    // Ensure rc_sync stays enabled after processing messages
+    __VM->rc_sync = 1;
 }
 
 // Register rayforce-ui extension types (stub for now)
@@ -623,6 +623,9 @@ void* rfui_rayforce_thread(void* arg) {
         return NULL;
     }
 
+    // Enable atomic RC for cross-thread obj_p safety (UI thread will call drop_obj)
+    __VM->rc_sync = 1;
+
     // Step 2: Set thread-local context for rayforce-ui functions
     g_ctx = ctx;
 
@@ -654,6 +657,7 @@ void* rfui_rayforce_thread(void* arg) {
         obj_p file_arg = runtime_get_arg("file");
         if (!is_null(file_arg)) {
             obj_p res = ray_load(file_arg);
+            __VM->rc_sync = 1;  // Restore after script may have triggered pool_run
             drop_obj(file_arg);
             if (IS_ERR(res)) {
                 // Print error but continue - GUI still runs

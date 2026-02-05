@@ -14,6 +14,9 @@ extern "C" {
 // Default queue capacity for UI<->Rayforce communication
 #define RFUI_QUEUE_CAPACITY 1024
 
+// Forward declare ray_ctx_p (defined in deps/rayforce/core/ctx.h)
+typedef struct ray_ctx_t *ray_ctx_p;
+
 typedef struct rfui_ctx_t {
     // Command line args (for runtime_create)
     // NOTE: argv is a shallow copy - caller must ensure argv remains valid
@@ -36,6 +39,10 @@ typedef struct rfui_ctx_t {
 
     // Exit flag - access must be protected by ready_mutex
     b8_t quit;
+
+    // UI-thread Rayforce VM context (created after Rayforce thread ready)
+    // Enables direct drop_obj() calls on UI thread
+    ray_ctx_p ui_vm_ctx;
 } rfui_ctx_t;
 
 // Create a new context with command line arguments

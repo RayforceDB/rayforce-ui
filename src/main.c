@@ -7,6 +7,7 @@
 #include "../include/rfui/rayforce_thread.h"
 #include "../include/rfui/ui.h"
 #include "../deps/rayforce/core/thread.h"
+#include "../deps/rayforce/core/ctx.h"  // For ray_ctx_create/destroy
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -84,6 +85,14 @@ i32_t rfui_init(i32_t argc, str_p argv[]) {
     // Wait for Rayforce thread to signal ready
     rfui_ctx_wait_ready(g_ctx);
 
+    // Create UI-thread VM (requires runtime to exist)
+    // Must be called ON the UI thread (main) - enables direct drop_obj() calls
+    g_ctx->ui_vm_ctx = ray_ctx_create();
+    if (!g_ctx->ui_vm_ctx) {
+        fprintf(stderr, "Warning: Failed to create UI VM context\n");
+        // Continue anyway - will leak obj_p on failure (acceptable degradation)
+    }
+
     return 0;
 }
 
@@ -138,7 +147,16 @@ nil_t rfui_destroy(nil_t) {
         return;
     }
 
-    // Send MSG_QUIT to Rayforce thread
+    // 1. Destroy UI components first (widgets can now drop_obj directly via UI VM)
+    rfui_ui_destroy();
+
+    // 2. Destroy UI VM (pushes heap to pending merge, sets __VM = NULL)
+    if (g_ctx->ui_vm_ctx) {
+        ray_ctx_destroy(g_ctx->ui_vm_ctx);
+        g_ctx->ui_vm_ctx = NULL;
+    }
+
+    // 3. Send MSG_QUIT to Rayforce thread
     rfui_ui_msg_t* quit_msg = malloc(sizeof(rfui_ui_msg_t));
     if (quit_msg) {
         quit_msg->type = RFUI_MSG_QUIT;
@@ -165,16 +183,13 @@ nil_t rfui_destroy(nil_t) {
         }
     }
 
-    // Join thread - continue with cleanup even if join fails
+    // 4. Join Rayforce thread (runtime_destroy will drain pending heaps)
     int join_result = thread_join(g_ray_thread);
     if (join_result != 0) {
         fprintf(stderr, "Warning: thread_join failed with error %d\n", join_result);
     }
 
-    // Destroy UI (GLFW/ImGui)
-    rfui_ui_destroy();
-
-    // Destroy context
+    // 5. Destroy context
     rfui_ctx_destroy(g_ctx);
     g_ctx = NULL;
 }

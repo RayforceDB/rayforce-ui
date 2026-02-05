@@ -33,12 +33,8 @@ nil_t rfui_registry_init(nil_t) {
 
 nil_t rfui_registry_destroy(nil_t) {
     // Free all widgets
-    // NOTE: Thread safety consideration - registry_destroy is called AFTER UI loop
-    // exits but BEFORE Rayforce thread is joined. This means drop_obj calls in
-    // widget_destroy happen from the UI thread, not the Rayforce thread.
-    // TODO: This is known technical debt. For proper thread safety, widgets with
-    // render_data should queue drops to Rayforce thread before destruction.
-    // Current approach is acceptable for shutdown but not ideal.
+    // UI thread has its own VM (created in main.c), so rfui_widget_destroy's
+    // drop_obj() calls work correctly via cross-heap foreign-block mechanism.
     for (rfui_widget_t* widget : g_widgets) {
         if (widget != nullptr) {
             // Free type-specific ui_state
@@ -49,25 +45,9 @@ nil_t rfui_registry_destroy(nil_t) {
             }
             widget->ui_state = nullptr;
 
-            // Null out Rayforce obj_p fields before destroy — the Rayforce
-            // thread (and its heap) is already joined/gone at this point,
-            // so drop_obj would segfault on freed heap memory.
-            widget->data = nullptr;
-            widget->post_query = nullptr;
-            widget->on_select = nullptr;
-            widget->render_data = nullptr;
-            for (int c = 0; c < MAX_COLS; c++) {
-                for (int i = 0; i < widget->col_rules[c].num_rules; i++) {
-                    widget->col_rules[c].rules[i].fn = nullptr;
-                }
-            }
-            for (int b = 0; b < 2; b++) {
-                for (int i = 0; i < widget->num_overlays[b]; i++) {
-                    widget->overlays[b][i].mask = nullptr;
-                }
-            }
+            // UI VM is alive, so rfui_widget_destroy's drop_obj calls work
+            rfui_widget_destroy(widget);
         }
-        rfui_widget_destroy(widget);
     }
     g_widgets.clear();
 }

@@ -283,58 +283,18 @@ i32_t rfui_ui_run(nil_t) {
           }
           break;
         case RFUI_MSG_DRAW:
-          // Update widget render_data and queue old data for drop
+          // Update widget render_data and drop old data directly (UI has its own VM)
           if (msg->widget) {
             // Swap overlay front/back buffers so UI reads newly built overlays
             msg->widget->overlay_front = 1 - msg->widget->overlay_front;
 
             obj_p old_data = rfui_registry_update_data(msg->widget, msg->data);
-            // Queue old data for drop in Rayforce thread (if not NULL)
             if (old_data) {
-              rfui_ui_msg_t *drop_msg =
-                  (rfui_ui_msg_t *)malloc(sizeof(rfui_ui_msg_t));
-              if (drop_msg) {
-                drop_msg->type = RFUI_MSG_DROP;
-                drop_msg->obj = old_data;
-                drop_msg->widget = nullptr;
-                drop_msg->expr = nullptr;
-                if (!rfui_queue_push(g_ctx->ui_to_ray, drop_msg)) {
-                  // Queue full - leak rather than crash
-                  // (drop_obj requires Rayforce thread runtime)
-                  free(drop_msg);
-                } else {
-                  poll_waker_p waker = rfui_ctx_get_waker(g_ctx);
-                  if (waker)
-                    poll_waker_wake(waker);
-                }
-              } else {
-                // Malloc failed - leak (drop_obj requires Rayforce thread)
-                (void)old_data;
-              }
+              drop_obj(old_data);
             }
           } else if (msg->data) {
-            // No widget - queue data for drop directly
-            rfui_ui_msg_t *drop_msg =
-                (rfui_ui_msg_t *)malloc(sizeof(rfui_ui_msg_t));
-            if (drop_msg) {
-              drop_msg->type = RFUI_MSG_DROP;
-              drop_msg->obj = msg->data;
-              drop_msg->widget = nullptr;
-              drop_msg->expr = nullptr;
-              if (!rfui_queue_push(g_ctx->ui_to_ray, drop_msg)) {
-                // Queue push failed - fall back to direct drop
-                // Leak (drop_obj requires Rayforce thread)
-                (void)msg->data;
-                free(drop_msg);
-              } else {
-                poll_waker_p waker = rfui_ctx_get_waker(g_ctx);
-                if (waker)
-                  poll_waker_wake(waker);
-              }
-            } else {
-              // Malloc failed - leak (drop_obj requires Rayforce thread)
-              (void)msg->data;
-            }
+            // No widget - drop data directly
+            drop_obj(msg->data);
           }
           break;
         case RFUI_MSG_ALERT:
@@ -349,54 +309,17 @@ i32_t rfui_ui_run(nil_t) {
               buf[len] = '\0';
               rfui_toast_push_alert(buf, msg->alert_type, msg->alert_duration);
             }
-            // Queue obj_p for drop on Rayforce thread
-            rfui_ui_msg_t *drop_msg =
-                (rfui_ui_msg_t *)malloc(sizeof(rfui_ui_msg_t));
-            if (drop_msg) {
-              drop_msg->type = RFUI_MSG_DROP;
-              drop_msg->obj = msg->data;
-              drop_msg->widget = nullptr;
-              drop_msg->expr = nullptr;
-              if (!rfui_queue_push(g_ctx->ui_to_ray, drop_msg)) {
-                (void)msg->data;
-                free(drop_msg);
-              } else {
-                poll_waker_p waker = rfui_ctx_get_waker(g_ctx);
-                if (waker)
-                  poll_waker_wake(waker);
-              }
-            }
-            msg->data = nullptr; // prevent double-drop
+            // Drop obj_p directly (UI has its own VM)
+            drop_obj(msg->data);
+            msg->data = nullptr;
           }
           break;
         case RFUI_MSG_RESULT:
           // Display result in REPL — text is in msg->data (obj_p TYPE_C8)
           if (msg->data) {
             rfui_repl_add_result_obj(msg->data);
-          }
-          // Queue data for drop
-          if (msg->data) {
-            rfui_ui_msg_t *drop_msg =
-                (rfui_ui_msg_t *)malloc(sizeof(rfui_ui_msg_t));
-            if (drop_msg) {
-              drop_msg->type = RFUI_MSG_DROP;
-              drop_msg->obj = msg->data;
-              drop_msg->widget = nullptr;
-              drop_msg->expr = nullptr;
-              if (!rfui_queue_push(g_ctx->ui_to_ray, drop_msg)) {
-                // Queue push failed - fall back to direct drop
-                // Leak (drop_obj requires Rayforce thread)
-                (void)msg->data;
-                free(drop_msg);
-              } else {
-                poll_waker_p waker = rfui_ctx_get_waker(g_ctx);
-                if (waker)
-                  poll_waker_wake(waker);
-              }
-            } else {
-              // Malloc failed - leak (drop_obj requires Rayforce thread)
-              (void)msg->data;
-            }
+            // Drop obj_p directly (UI has its own VM)
+            drop_obj(msg->data);
           }
           break;
         }

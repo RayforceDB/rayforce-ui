@@ -33,6 +33,7 @@ rfui_ctx_t* rfui_ctx_create(i32_t argc, str_p argv[]) {
     ctx->ready = B8_FALSE;
     ctx->quit = B8_FALSE;
     ctx->waker = NULL;
+    ctx->ui_vm_ctx = NULL;
 
     return ctx;
 }
