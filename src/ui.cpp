@@ -224,6 +224,13 @@ i32_t rfui_ui_init(nil_t) {
                                  embed_IBMPlexSans_Regular_ttf_len, font_size,
                                  &regular_cfg);
 
+  // DejaVu Sans Mono for REPL — monospace ensures box-drawing alignment (index 3)
+  ImFontConfig mono_cfg;
+  mono_cfg.FontDataOwnedByAtlas = false;
+  io.Fonts->AddFontFromMemoryTTF(
+      (void *)embed_DejaVuSansMono_Subset_ttf,
+      embed_DejaVuSansMono_Subset_ttf_len, font_size, &mono_cfg);
+
   // Setup Platform/Renderer backends
   ImGui_ImplGlfw_InitForOpenGL(g_window, true);
   ImGui_ImplOpenGL3_Init(g_glsl_version);

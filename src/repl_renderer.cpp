@@ -75,7 +75,6 @@ static repl_state_t *g_repl = nullptr;
 // ANSI color tables and render_ansi_text() from shared header
 #include "../include/rfui/ansi_text.h"
 
-// render_ansi_text() provided by ansi_text.h above
 
 static bool is_word_char_ac(char c) {
   return isalnum((unsigned char)c) || c == '_' || c == '-' || c == '?' ||
@@ -317,10 +316,15 @@ nil_t rfui_repl_render(nil_t) {
   bool want_focus = ImGui::IsWindowAppearing() || state->scroll_to_bottom;
   bool mouse_clicked = ImGui::IsMouseClicked(0);
 
+  // Use monospace font for REPL (font index 3 — DejaVu Sans Mono)
+  ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[3]);
+
   // Tab bar: REPL + Console
   if (ImGui::BeginTabBar("##repl_tabs")) {
     if (ImGui::BeginTabItem("REPL")) {
       // Single scrollable region for entire terminal
+      // Zero vertical item spacing so box-drawing chars (│╭╰) connect seamlessly
+      ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4, 0));
       ImGui::BeginChild("##terminal", ImVec2(0, 0), false,
                         ImGuiWindowFlags_HorizontalScrollbar);
 
@@ -472,6 +476,7 @@ nil_t rfui_repl_render(nil_t) {
       state->last_input_pos = input_pos;
 
       ImGui::EndChild();
+      ImGui::PopStyleVar(); // ItemSpacing
 
       // Autocomplete popup moved to rfui_repl_render_overlay()
 
@@ -485,6 +490,7 @@ nil_t rfui_repl_render(nil_t) {
       }
       ImGui::Separator();
 
+      ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4, 0));
       ImGui::BeginChild("##console", ImVec2(0, 0), false,
                         ImGuiWindowFlags_HorizontalScrollbar);
 
@@ -513,11 +519,14 @@ nil_t rfui_repl_render(nil_t) {
       }
 
       ImGui::EndChild();
+      ImGui::PopStyleVar(); // ItemSpacing
       ImGui::EndTabItem();
     }
 
     ImGui::EndTabBar();
   }
+
+  ImGui::PopFont();
 }
 
 nil_t rfui_repl_render_overlay(nil_t) {

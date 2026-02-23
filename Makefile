@@ -170,7 +170,7 @@ endif
 default: $(TARGET)
 debug: $(TARGET)
 
-EMBED_ASSETS = assets/fonts/IBMPlexSans-Bold.ttf assets/fonts/IBMPlexSans-Regular.ttf assets/fonts/fa-solid-900.otf assets/images/logo.svg assets/images/icon.svg
+EMBED_ASSETS = assets/fonts/IBMPlexSans-Bold.ttf assets/fonts/IBMPlexSans-Regular.ttf assets/fonts/fa-solid-900.otf assets/fonts/DejaVuSansMono-Subset.ttf assets/images/logo.svg assets/images/icon.svg
 
 src/embed_assets.h: $(EMBED_ASSETS) scripts/embed.sh
 	sh scripts/embed.sh $(EMBED_ASSETS) > $@

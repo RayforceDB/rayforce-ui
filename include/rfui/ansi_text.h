@@ -29,11 +29,19 @@ static const ImVec4 ansi_bright[8] = {
     ImVec4(1.000f, 1.000f, 1.000f, 1.0f),  // 7 bright white
 };
 
-// Render text with ANSI escape sequence support
+// Render text with ANSI escape sequence support using DrawList for pixel-exact positioning.
+// Bypasses ImGui layout to eliminate inter-line gaps (needed for box-drawing characters).
 // Handles: ESC[0m (reset), ESC[1m (bold), ESC[3m (dim),
 //          ESC[30-37m, ESC[90-97m (fg colors), ESC[38;5;Nm (256-color)
 static inline void render_ansi_text(const char* text, ImVec4 default_color) {
     if (!text || !*text) return;
+
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    ImFont* font = ImGui::GetFont();
+    float font_size = ImGui::GetFontSize();
+    ImVec2 origin = ImGui::GetCursorScreenPos();
+    float x = 0.0f, y = 0.0f;
+    float max_x = 0.0f;
 
     ImVec4 current_color = default_color;
     bool bold = false;
@@ -50,12 +58,15 @@ static inline void render_ansi_text(const char* text, ImVec4 default_color) {
                 const char* nl = seg;
                 while (nl < p && *nl != '\n') nl++;
                 if (nl > seg) {
-                    ImGui::PushStyleColor(ImGuiCol_Text, current_color);
-                    ImGui::TextUnformatted(seg, nl);
-                    ImGui::PopStyleColor();
-                    if (nl < p || *p) ImGui::SameLine(0, 0);
+                    ImU32 col32 = ImGui::ColorConvertFloat4ToU32(current_color);
+                    dl->AddText(font, font_size,
+                                ImVec2(origin.x + x, origin.y + y),
+                                col32, seg, nl);
+                    ImVec2 sz = font->CalcTextSizeA(font_size, FLT_MAX, 0.0f, seg, nl);
+                    x += sz.x;
+                    if (x > max_x) max_x = x;
                 }
-                if (nl < p && *nl == '\n') { ImGui::NewLine(); nl++; }
+                if (nl < p && *nl == '\n') { y += font_size; x = 0.0f; nl++; }
                 seg = nl;
             }
         }
@@ -119,4 +130,9 @@ static inline void render_ansi_text(const char* text, ImVec4 default_color) {
             else { while (*p && *p != 'm') p++; if (*p == 'm') p++; break; }
         }
     }
+
+    // Reserve space in ImGui layout so scrolling and subsequent widgets work
+    float total_h = y + (x > 0.0f ? font_size : 0.0f);
+    if (max_x < 1.0f) max_x = 1.0f;
+    ImGui::Dummy(ImVec2(max_x, total_h));
 }
