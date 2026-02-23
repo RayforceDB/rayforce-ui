@@ -380,10 +380,10 @@ nil_t rfui_repl_render(nil_t) {
       }
       // Detect click this frame → set flag for NEXT frame (deferred,
       // because ImGui overrides focus when processing the child click).
-      // Only steal focus if the click was actually ON this window (not on a
-      // floating window above it)
+      // Use ChildWindows (not RootAndChildWindows) so floating/docked
+      // windows above the REPL don't get blocked from moving.
       if (mouse_clicked &&
-          ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows)) {
+          ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows)) {
         state->focus_next_frame = true;
       }
 
